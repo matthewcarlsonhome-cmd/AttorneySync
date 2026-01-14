@@ -496,93 +496,60 @@ export default function App() {
           )}
 
           {/* Hero Section */}
-          <div className="relative bg-gradient-to-br from-blue-600 via-blue-700 to-indigo-800 rounded-3xl p-8 md:p-10 mb-10 text-white overflow-hidden shadow-2xl shadow-blue-500/30">
+          <div className="relative bg-gradient-to-br from-blue-600 via-blue-700 to-indigo-800 rounded-2xl p-6 md:p-8 mb-8 text-white overflow-hidden shadow-xl shadow-blue-500/25">
             {/* Background decoration */}
-            <div className="absolute top-0 right-0 w-96 h-96 bg-white/5 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2" />
-            <div className="absolute bottom-0 left-0 w-64 h-64 bg-indigo-500/20 rounded-full blur-3xl translate-y-1/2 -translate-x-1/2" />
+            <div className="absolute top-0 right-0 w-64 h-64 bg-white/5 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2" />
 
-            <div className="relative">
-              <div className="flex items-center gap-2 mb-4">
-                <div className="px-3 py-1 bg-white/20 rounded-full text-sm font-medium backdrop-blur-sm">
-                  Powered by Claude AI
+            <div className="relative flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-3 mb-2">
+                  <h2 className="text-2xl md:text-3xl font-bold">
+                    AI-Powered Legal Marketing
+                  </h2>
+                  <span className="px-2 py-0.5 bg-white/20 rounded-full text-xs font-medium backdrop-blur-sm hidden sm:inline">
+                    Claude AI
+                  </span>
                 </div>
+                <p className="text-blue-100 text-sm md:text-base max-w-xl">
+                  {totalWorkflows} professional workflows for content, campaigns, and operations.
+                </p>
               </div>
-              <h2 className="text-3xl md:text-4xl font-bold mb-4">
-                AI-Powered Legal Marketing
-              </h2>
-              <p className="text-blue-100 max-w-2xl text-lg leading-relaxed">
-                {totalWorkflows} professional workflows designed specifically for law firm marketing.
-                Generate content, analyze markets, build campaigns, and streamline operations.
-              </p>
 
               {/* Quick stats */}
-              <div className="flex flex-wrap gap-4 mt-8">
-                <div className="flex items-center gap-2 px-4 py-2 bg-white/10 rounded-xl backdrop-blur-sm">
-                  <FileText className="w-5 h-5" />
+              <div className="flex flex-wrap gap-2">
+                <div className="flex items-center gap-1.5 px-3 py-1.5 bg-white/10 rounded-lg backdrop-blur-sm text-sm">
+                  <FileText className="w-4 h-4" />
                   <span className="font-medium">{totalWorkflows} Workflows</span>
                 </div>
-                <div className="flex items-center gap-2 px-4 py-2 bg-white/10 rounded-xl backdrop-blur-sm">
-                  <Layers className="w-5 h-5" />
+                <div className="flex items-center gap-1.5 px-3 py-1.5 bg-white/10 rounded-lg backdrop-blur-sm text-sm">
+                  <Layers className="w-4 h-4" />
                   <span className="font-medium">{categoryCount} Categories</span>
                 </div>
-                <div className="flex items-center gap-2 px-4 py-2 bg-white/10 rounded-xl backdrop-blur-sm">
-                  <Clock className="w-5 h-5" />
-                  <span className="font-medium">30-120s Generation</span>
-                </div>
               </div>
-            </div>
-          </div>
-
-          {/* Proposal Reference Card */}
-          <div className="bg-white rounded-2xl border border-slate-200 p-6 mb-10 shadow-sm">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 bg-slate-100 rounded-xl flex items-center justify-center">
-                <ClipboardList className="w-5 h-5 text-slate-600" />
-              </div>
-              <div>
-                <h3 className="font-semibold text-slate-900">Proposal Workflow Mapping</h3>
-                <p className="text-sm text-slate-500">Quick reference to proposal sections</p>
-              </div>
-            </div>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
-              {Object.entries(proposalMapping).map(([ref, ids]) => (
-                <div key={ref} className="bg-slate-50 hover:bg-slate-100 rounded-xl p-3 transition-colors cursor-default">
-                  <span className="font-semibold text-slate-700 text-sm">{ref}</span>
-                  <p className="text-xs text-slate-500 mt-0.5">{ids.length} workflow{ids.length > 1 ? 's' : ''}</p>
-                </div>
-              ))}
             </div>
           </div>
 
           {/* Workflow Categories */}
-          <div className="space-y-10">
+          <div className="space-y-6">
             {Object.entries(groupedWorkflows).map(([categoryId, categoryWorkflows]) => {
               const category = categories[categoryId];
               const Icon = iconMap[category.icon] || FileText;
               return (
                 <div key={categoryId} className="animate-fadeIn">
                   {/* Category Header */}
-                  <div className="flex items-center gap-3 mb-5">
+                  <div className="flex items-center gap-2 mb-3">
                     <div
-                      className="w-12 h-12 rounded-2xl flex items-center justify-center shadow-md"
-                      style={{
-                        backgroundColor: category.color + '15',
-                        boxShadow: `0 4px 14px ${category.color}20`
-                      }}
+                      className="w-9 h-9 rounded-xl flex items-center justify-center"
+                      style={{ backgroundColor: category.color + '15' }}
                     >
-                      <Icon className="w-6 h-6" style={{ color: category.color }} />
+                      <Icon className="w-5 h-5" style={{ color: category.color }} />
                     </div>
-                    <div>
-                      <h3 className="text-xl font-bold text-slate-900">{category.name}</h3>
-                      <p className="text-sm text-slate-500">{category.description}</p>
-                    </div>
-                    <div className="ml-auto">
-                      <span className="badge badge-gray">{categoryWorkflows.length} workflow{categoryWorkflows.length > 1 ? 's' : ''}</span>
-                    </div>
+                    <h3 className="text-base font-bold text-slate-900">{category.name}</h3>
+                    <span className="text-xs text-slate-400 ml-1">({categoryWorkflows.length})</span>
                   </div>
 
                   {/* Workflow Cards Grid */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 stagger">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 stagger">
                     {categoryWorkflows.map(workflow => {
                       const WIcon = iconMap[workflow.icon] || FileText;
                       return (
@@ -590,36 +557,23 @@ export default function App() {
                           key={workflow.id}
                           onClick={() => selectWorkflow(workflow)}
                           disabled={!hasApiKey}
-                          className="bg-white rounded-2xl p-6 border border-slate-200 hover:border-blue-300 hover:shadow-xl transition-all duration-300 text-left group disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:shadow-none disabled:hover:border-slate-200"
-                          style={{
-                            transform: 'translateY(0)',
-                          }}
-                          onMouseEnter={(e) => { if (hasApiKey) e.currentTarget.style.transform = 'translateY(-4px)'; }}
+                          className="bg-white rounded-xl p-4 border border-slate-200 hover:border-blue-300 hover:shadow-lg transition-all duration-200 text-left group disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:shadow-none disabled:hover:border-slate-200"
+                          style={{ transform: 'translateY(0)' }}
+                          onMouseEnter={(e) => { if (hasApiKey) e.currentTarget.style.transform = 'translateY(-2px)'; }}
                           onMouseLeave={(e) => { e.currentTarget.style.transform = 'translateY(0)'; }}
                         >
-                          <div className="flex items-start justify-between mb-4">
+                          <div className="flex items-start gap-3">
                             <div
-                              className="w-12 h-12 rounded-xl flex items-center justify-center transition-transform group-hover:scale-110 duration-300"
+                              className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 transition-transform group-hover:scale-105 duration-200"
                               style={{ backgroundColor: workflow.color + '12' }}
                             >
-                              <WIcon className="w-6 h-6" style={{ color: workflow.color }} />
+                              <WIcon className="w-5 h-5" style={{ color: workflow.color }} />
                             </div>
-                            <div className="flex items-center gap-2">
-                              {workflow.proposalRef && (
-                                <span className="badge badge-gray text-xs">
-                                  {workflow.proposalRef}
-                                </span>
-                              )}
-                              <ChevronRight className="w-5 h-5 text-slate-300 group-hover:text-blue-500 group-hover:translate-x-1 transition-all duration-200" />
+                            <div className="flex-1 min-w-0">
+                              <h4 className="font-semibold text-slate-900 text-sm leading-tight group-hover:text-blue-700 transition-colors">{workflow.name}</h4>
+                              <p className="text-xs text-slate-500 line-clamp-2 mt-1">{workflow.description}</p>
                             </div>
-                          </div>
-                          <h4 className="font-bold text-slate-900 mb-2 group-hover:text-blue-700 transition-colors">{workflow.name}</h4>
-                          <p className="text-sm text-slate-500 line-clamp-2 mb-4">{workflow.description}</p>
-                          <div className="flex items-center gap-3 pt-3 border-t border-slate-100">
-                            <div className="flex items-center gap-1.5 text-slate-400">
-                              <Clock className="w-4 h-4" />
-                              <span className="text-xs font-medium">{workflow.estimatedTime}</span>
-                            </div>
+                            <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-blue-500 flex-shrink-0 mt-0.5" />
                           </div>
                         </button>
                       );
@@ -631,9 +585,9 @@ export default function App() {
           </div>
 
           {/* Footer */}
-          <footer className="mt-16 pt-8 border-t border-slate-200 text-center">
-            <p className="text-sm text-slate-500">
-              Attorney Sync AI &middot; Legal Marketing Automation Platform &middot; Powered by Claude
+          <footer className="mt-10 pt-6 border-t border-slate-200 text-center">
+            <p className="text-xs text-slate-400">
+              Attorney Sync AI &middot; Legal Marketing Automation &middot; Powered by Claude
             </p>
           </footer>
         </main>
