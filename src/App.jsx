@@ -7,7 +7,7 @@ import {
   Phone, TrendingUp, ClipboardList, Mail, Star, PieChart, CheckSquare,
   Download, Upload, Key, Database, Globe, Save, X, Menu, AlertCircle,
   Linkedin, ExternalLink, RefreshCw, Clock, Zap, Shield, Info, Code,
-  ChevronDown, ChevronUp
+  ChevronDown, ChevronUp, FileDown
 } from 'lucide-react';
 
 // Icon mapping
@@ -116,6 +116,22 @@ function downloadCSV(content, filename) {
   link.click();
 }
 
+function downloadText(content, filename) {
+  const blob = new Blob([content], { type: 'text/plain;charset=utf-8;' });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = filename;
+  link.click();
+}
+
+function downloadMarkdown(content, filename) {
+  const blob = new Blob([content], { type: 'text/markdown;charset=utf-8;' });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = filename;
+  link.click();
+}
+
 // Main App Component
 export default function App() {
   const [currentView, setCurrentView] = useState('dashboard');
@@ -138,7 +154,6 @@ export default function App() {
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        // Migration: convert old anthropicApiKey to new format
         if (parsed.anthropicApiKey && !parsed.apiKeys) {
           parsed.apiKeys = {
             anthropic: parsed.anthropicApiKey,
@@ -296,26 +311,40 @@ export default function App() {
     setTimeout(() => setCopiedId(null), 2000);
   };
 
-  // Download Google Ads CSVs (separate files per object type)
+  // Download all output as markdown
+  const downloadAllOutput = () => {
+    if (!output || !selectedWorkflow) return;
+
+    const dateStr = new Date().toISOString().split('T')[0];
+    const clientName = formData.client_name || 'output';
+    let content = `# ${selectedWorkflow.name}\n\nGenerated: ${dateStr}\n\n---\n\n`;
+
+    selectedWorkflow.outputSections.forEach(section => {
+      const sectionContent = output[section.id];
+      if (sectionContent) {
+        content += `## ${section.label}\n\n${sectionContent}\n\n---\n\n`;
+      }
+    });
+
+    downloadMarkdown(content, `${clientName}_${selectedWorkflow.id}_${dateStr}.md`);
+  };
+
+  // Download Google Ads CSVs
   const handleDownloadGoogleAdsCSVs = () => {
     const dateStr = new Date().toISOString().split('T')[0];
     const clientName = formData.client_name || 'campaign';
 
-    // Parse the output sections for Google Ads data
     if (output?.csv_data) {
       downloadCSV(output.csv_data, `${clientName}_google_ads_full_${dateStr}.csv`);
     }
 
-    // Generate separate CSVs from structured output
     if (output?.campaign_name) {
-      // Campaign CSV
       const campaignCSV = `Campaign Name,Campaign Type,Budget,Bid Strategy,Location Target
 "${output.campaign_name}","Search","${formData.monthly_budget || ''}","Maximize Conversions","${formData.target_location || ''}"`;
       downloadCSV(campaignCSV, `${clientName}_campaigns_${dateStr}.csv`);
     }
 
     if (output?.ad_groups) {
-      // Ad Groups CSV - parse from markdown
       const adGroupLines = output.ad_groups.split('\n').filter(line => line.includes('Ad Group'));
       if (adGroupLines.length > 0) {
         let adGroupCSV = 'Campaign,Ad Group,Default Max CPC\n';
@@ -330,7 +359,6 @@ export default function App() {
     }
 
     if (output?.negative_keywords) {
-      // Negative Keywords CSV
       const negKeywords = output.negative_keywords.split('\n').filter(Boolean);
       let negKeywordCSV = 'Campaign,Negative Keyword,Match Type\n';
       negKeywords.forEach(kw => {
@@ -343,7 +371,6 @@ export default function App() {
     }
 
     if (output?.extensions) {
-      // Extensions CSV
       let extensionsCSV = 'Campaign,Extension Type,Extension Text,Final URL\n';
       const extLines = output.extensions.split('\n').filter(Boolean);
       extLines.forEach(line => {
@@ -416,7 +443,6 @@ export default function App() {
 
     return (
       <div className="min-h-screen bg-slate-50">
-        {/* Header */}
         <header className="bg-white border-b border-slate-200 sticky top-0 z-50">
           <div className="max-w-3xl mx-auto px-4 py-3 flex items-center gap-3">
             <button onClick={() => setCurrentView('dashboard')} className="p-2 hover:bg-slate-100 rounded-lg">
@@ -435,7 +461,6 @@ export default function App() {
               <span className="font-medium text-slate-900 text-sm">AI Model Configuration</span>
             </div>
             <div className="p-4 space-y-4">
-              {/* Provider Selection */}
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-2">Model Provider</label>
                 <div className="grid grid-cols-3 gap-2">
@@ -462,7 +487,6 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Model Selection */}
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-2">Model</label>
                 <select
@@ -478,7 +502,6 @@ export default function App() {
                 </select>
               </div>
 
-              {/* API Key */}
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-2">
                   {currentProvider.name} API Key <span className="text-red-500">*</span>
@@ -557,7 +580,6 @@ export default function App() {
             </div>
           </div>
 
-          {/* Save Button */}
           <button onClick={saveSettings} className="w-full py-3 btn btn-primary rounded-xl">
             {settingsSaved ? <><Check className="w-4 h-4" /> Saved!</> : <><Save className="w-4 h-4" /> Save Settings</>}
           </button>
@@ -580,7 +602,6 @@ export default function App() {
 
     return (
       <div className="min-h-screen bg-slate-50">
-        {/* Header */}
         <header className="bg-white border-b border-slate-200 sticky top-0 z-50">
           <div className="max-w-6xl mx-auto px-4 h-12 flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -602,7 +623,6 @@ export default function App() {
         </header>
 
         <main className="max-w-6xl mx-auto px-4 py-4">
-          {/* API Key Warning */}
           {!hasApiKey && (
             <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4 flex items-center gap-3 text-sm">
               <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0" />
@@ -627,22 +647,21 @@ export default function App() {
             </div>
           </div>
 
-          {/* Workflow Categories - Ultra Compact */}
-          <div className="space-y-3">
+          {/* Workflow Categories with Full Descriptions */}
+          <div className="space-y-6">
             {Object.entries(groupedWorkflows).map(([categoryId, categoryWorkflows]) => {
               const category = categories[categoryId];
               const Icon = iconMap[category.icon] || FileText;
               return (
                 <div key={categoryId}>
-                  {/* Category Header */}
-                  <div className="flex items-center gap-2 mb-2">
+                  <div className="flex items-center gap-2 mb-3">
                     <Icon className="w-4 h-4" style={{ color: category.color }} />
                     <span className="text-sm font-semibold text-slate-700">{category.name}</span>
                     <span className="text-xs text-slate-400">({categoryWorkflows.length})</span>
                   </div>
 
-                  {/* Workflow Grid - Very Compact */}
-                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2">
+                  {/* Workflow Cards with Full Details */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                     {categoryWorkflows.map(workflow => {
                       const WIcon = iconMap[workflow.icon] || FileText;
                       return (
@@ -650,13 +669,33 @@ export default function App() {
                           key={workflow.id}
                           onClick={() => selectWorkflow(workflow)}
                           disabled={!hasApiKey}
-                          className="bg-white rounded-lg p-2.5 border border-slate-200 hover:border-blue-300 hover:shadow transition-all text-left group disabled:opacity-50 disabled:cursor-not-allowed"
+                          className="bg-white rounded-xl p-4 border border-slate-200 hover:border-blue-300 hover:shadow-md transition-all text-left group disabled:opacity-50 disabled:cursor-not-allowed"
                         >
-                          <div className="flex items-center gap-2">
-                            <WIcon className="w-4 h-4 flex-shrink-0" style={{ color: workflow.color }} />
-                            <span className="text-xs font-medium text-slate-800 truncate group-hover:text-blue-700">
-                              {workflow.name}
-                            </span>
+                          <div className="flex items-start gap-3">
+                            <div
+                              className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0"
+                              style={{ backgroundColor: workflow.color + '15' }}
+                            >
+                              <WIcon className="w-5 h-5" style={{ color: workflow.color }} />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <h3 className="font-semibold text-slate-900 text-sm group-hover:text-blue-700 transition-colors">
+                                {workflow.name}
+                              </h3>
+                              <p className="text-xs text-slate-500 mt-1 line-clamp-2">
+                                {workflow.description}
+                              </p>
+                              <div className="flex items-center gap-2 mt-2">
+                                <span className="text-xs text-slate-400">
+                                  {workflow.inputs.length} inputs
+                                </span>
+                                <span className="text-slate-300">•</span>
+                                <span className="text-xs text-slate-400">
+                                  {workflow.outputSections.length} outputs
+                                </span>
+                              </div>
+                            </div>
+                            <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-blue-500 flex-shrink-0 mt-1" />
                           </div>
                         </button>
                       );
@@ -667,7 +706,6 @@ export default function App() {
             })}
           </div>
 
-          {/* Footer */}
           <footer className="mt-6 pt-4 border-t border-slate-200 text-center">
             <p className="text-xs text-slate-400">Attorney Sync AI · Powered by {currentProvider.name}</p>
           </footer>
@@ -681,13 +719,15 @@ export default function App() {
     if (!selectedWorkflow) return null;
     const Icon = iconMap[selectedWorkflow.icon] || FileText;
     const showWordPressButton = selectedWorkflow.outputActions?.includes('publish_wordpress');
-    const showCSVDownload = selectedWorkflow.outputActions?.includes('download_csv');
     const isGoogleAds = selectedWorkflow.id === 'google-ads-campaign-builder';
     const currentProvider = MODEL_PROVIDERS[settings.provider];
 
+    // Generate input summary
+    const requiredInputs = selectedWorkflow.inputs.filter(i => i.required);
+    const optionalInputs = selectedWorkflow.inputs.filter(i => !i.required);
+
     return (
       <div className="min-h-screen bg-slate-50">
-        {/* Header */}
         <header className="bg-white border-b border-slate-200 sticky top-0 z-50">
           <div className="max-w-6xl mx-auto px-4 h-12 flex items-center gap-3">
             <button onClick={() => { setCurrentView('dashboard'); setOutput(null); }} className="p-2 hover:bg-slate-100 rounded-lg">
@@ -700,6 +740,57 @@ export default function App() {
         </header>
 
         <main className="max-w-6xl mx-auto px-4 py-4">
+          {/* Workflow Overview */}
+          <div className="bg-white rounded-xl border border-slate-200 p-4 mb-4">
+            <div className="flex items-start gap-4">
+              <div
+                className="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0"
+                style={{ backgroundColor: selectedWorkflow.color + '15' }}
+              >
+                <Icon className="w-6 h-6" style={{ color: selectedWorkflow.color }} />
+              </div>
+              <div className="flex-1">
+                <h2 className="font-bold text-slate-900">{selectedWorkflow.name}</h2>
+                <p className="text-sm text-slate-600 mt-1">{selectedWorkflow.description}</p>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                  {/* Required Inputs */}
+                  <div className="bg-blue-50 rounded-lg p-3">
+                    <h4 className="text-xs font-semibold text-blue-800 mb-2 flex items-center gap-1">
+                      <ClipboardList className="w-3 h-3" /> Required Inputs ({requiredInputs.length})
+                    </h4>
+                    <ul className="text-xs text-blue-700 space-y-1">
+                      {requiredInputs.map(input => (
+                        <li key={input.id} className="flex items-center gap-1.5">
+                          <span className="w-1 h-1 bg-blue-500 rounded-full" />
+                          {input.label}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+
+                  {/* Outputs */}
+                  <div className="bg-green-50 rounded-lg p-3">
+                    <h4 className="text-xs font-semibold text-green-800 mb-2 flex items-center gap-1">
+                      <FileText className="w-3 h-3" /> Generated Outputs ({selectedWorkflow.outputSections.length})
+                    </h4>
+                    <ul className="text-xs text-green-700 space-y-1">
+                      {selectedWorkflow.outputSections.slice(0, 5).map(section => (
+                        <li key={section.id} className="flex items-center gap-1.5">
+                          <span className="w-1 h-1 bg-green-500 rounded-full" />
+                          {section.label}
+                        </li>
+                      ))}
+                      {selectedWorkflow.outputSections.length > 5 && (
+                        <li className="text-green-600">+{selectedWorkflow.outputSections.length - 5} more...</li>
+                      )}
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
           {/* System Prompt Section */}
           <div className="bg-white rounded-lg border border-slate-200 mb-4 overflow-hidden">
             <button
@@ -843,20 +934,20 @@ export default function App() {
                 <span className="text-sm font-medium text-slate-700">Output</span>
                 {output && (
                   <div className="flex items-center gap-1">
+                    {/* Universal Download Button */}
+                    <button
+                      onClick={downloadAllOutput}
+                      className="px-2 py-1 text-xs bg-slate-100 text-slate-700 rounded hover:bg-slate-200 flex items-center gap-1"
+                      title="Download all output as Markdown"
+                    >
+                      <FileDown className="w-3 h-3" /> Download
+                    </button>
                     {isGoogleAds && (
                       <button
                         onClick={handleDownloadGoogleAdsCSVs}
                         className="px-2 py-1 text-xs bg-green-50 text-green-700 rounded hover:bg-green-100 flex items-center gap-1"
                       >
                         <Download className="w-3 h-3" /> CSVs
-                      </button>
-                    )}
-                    {showCSVDownload && !isGoogleAds && output.csv_data && (
-                      <button
-                        onClick={() => downloadCSV(output.csv_data, `export_${new Date().toISOString().split('T')[0]}.csv`)}
-                        className="px-2 py-1 text-xs bg-green-50 text-green-700 rounded hover:bg-green-100 flex items-center gap-1"
-                      >
-                        <Download className="w-3 h-3" /> CSV
                       </button>
                     )}
                     {showWordPressButton && output.article && (
