@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { workflows, categories, proposalMapping } from './workflows/index.js';
+import { workflows, categories } from './workflows/index.js';
 import ReactMarkdown from 'react-markdown';
 import {
   FileText, Search, Share2, BarChart3, Settings, PenTool, Layers,
   Target, ChevronRight, Copy, Check, Loader2, ArrowLeft, Sparkles,
   Phone, TrendingUp, ClipboardList, Mail, Star, PieChart, CheckSquare,
   Download, Upload, Key, Database, Globe, Save, X, Menu, AlertCircle,
-  Linkedin, ExternalLink, RefreshCw, Clock, Zap, Shield, Info
+  Linkedin, ExternalLink, RefreshCw, Clock, Zap, Shield, Info, Code,
+  ChevronDown, ChevronUp
 } from 'lucide-react';
 
 // Icon mapping
@@ -14,6 +15,45 @@ const iconMap = {
   FileText, Search, Share2, BarChart3, Settings, PenTool, Layers,
   Target, Phone, TrendingUp, ClipboardList, Mail, Star, PieChart,
   CheckSquare, Linkedin
+};
+
+// Model providers and their available models
+const MODEL_PROVIDERS = {
+  anthropic: {
+    name: 'Claude (Anthropic)',
+    icon: '🟠',
+    models: [
+      { id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4', description: 'Fast & capable' },
+      { id: 'claude-opus-4-20250514', name: 'Claude Opus 4', description: 'Most powerful' },
+      { id: 'claude-3-5-sonnet-20241022', name: 'Claude 3.5 Sonnet', description: 'Previous gen' },
+      { id: 'claude-3-opus-20240229', name: 'Claude 3 Opus', description: 'Previous gen' }
+    ],
+    apiKeyPlaceholder: 'sk-ant-api03-...',
+    apiKeyHelp: 'console.anthropic.com'
+  },
+  openai: {
+    name: 'ChatGPT (OpenAI)',
+    icon: '🟢',
+    models: [
+      { id: 'gpt-4o', name: 'GPT-4o', description: 'Latest multimodal' },
+      { id: 'gpt-4o-mini', name: 'GPT-4o Mini', description: 'Fast & affordable' },
+      { id: 'gpt-4-turbo', name: 'GPT-4 Turbo', description: 'High capability' },
+      { id: 'gpt-4', name: 'GPT-4', description: 'Original GPT-4' }
+    ],
+    apiKeyPlaceholder: 'sk-...',
+    apiKeyHelp: 'platform.openai.com'
+  },
+  google: {
+    name: 'Gemini (Google)',
+    icon: '🔵',
+    models: [
+      { id: 'gemini-1.5-pro', name: 'Gemini 1.5 Pro', description: 'Most capable' },
+      { id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash', description: 'Fast & efficient' },
+      { id: 'gemini-pro', name: 'Gemini Pro', description: 'Balanced' }
+    ],
+    apiKeyPlaceholder: 'AIza...',
+    apiKeyHelp: 'aistudio.google.com'
+  }
 };
 
 // Local storage keys
@@ -24,14 +64,18 @@ const STORAGE_KEYS = {
 
 // Default settings structure
 const defaultSettings = {
-  anthropicApiKey: '',
+  provider: 'anthropic',
+  model: 'claude-sonnet-4-20250514',
+  apiKeys: {
+    anthropic: '',
+    openai: '',
+    google: ''
+  },
   wordpressUrl: '',
   wordpressUsername: '',
   wordpressAppPassword: '',
   defaultClientName: '',
-  defaultLocation: '',
-  companyName: 'Attorney Sync',
-  theme: 'light'
+  defaultLocation: ''
 };
 
 // Parse XML output from Claude
@@ -72,14 +116,6 @@ function downloadCSV(content, filename) {
   link.click();
 }
 
-function downloadText(content, filename) {
-  const blob = new Blob([content], { type: 'text/plain;charset=utf-8;' });
-  const link = document.createElement('a');
-  link.href = URL.createObjectURL(blob);
-  link.download = filename;
-  link.click();
-}
-
 // Main App Component
 export default function App() {
   const [currentView, setCurrentView] = useState('dashboard');
@@ -94,14 +130,24 @@ export default function App() {
   const [settingsSaved, setSettingsSaved] = useState(false);
   const [publishingToWP, setPublishingToWP] = useState(false);
   const [wpPublishResult, setWpPublishResult] = useState(null);
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [showSystemPrompt, setShowSystemPrompt] = useState(false);
 
   // Load settings from localStorage on mount
   useEffect(() => {
     const saved = localStorage.getItem(STORAGE_KEYS.SETTINGS);
     if (saved) {
       try {
-        setSettings({ ...defaultSettings, ...JSON.parse(saved) });
+        const parsed = JSON.parse(saved);
+        // Migration: convert old anthropicApiKey to new format
+        if (parsed.anthropicApiKey && !parsed.apiKeys) {
+          parsed.apiKeys = {
+            anthropic: parsed.anthropicApiKey,
+            openai: '',
+            google: ''
+          };
+          delete parsed.anthropicApiKey;
+        }
+        setSettings({ ...defaultSettings, ...parsed });
       } catch (e) {
         console.error('Failed to load settings:', e);
       }
@@ -115,10 +161,12 @@ export default function App() {
     setTimeout(() => setSettingsSaved(false), 2000);
   };
 
+  // Get current API key
+  const getCurrentApiKey = () => settings.apiKeys?.[settings.provider] || '';
+
   // Handle workflow selection
   const selectWorkflow = (workflow) => {
     setSelectedWorkflow(workflow);
-    // Pre-fill with default values from settings
     const initialData = {};
     workflow.inputs.forEach(input => {
       if (input.id === 'client_name' && settings.defaultClientName) {
@@ -134,6 +182,7 @@ export default function App() {
     setRawOutput('');
     setError(null);
     setWpPublishResult(null);
+    setShowSystemPrompt(false);
     setCurrentView('workflow');
   };
 
@@ -142,12 +191,83 @@ export default function App() {
     setFormData(prev => ({ ...prev, [inputId]: value }));
   };
 
+  // API call based on provider
+  const callAPI = async (systemPrompt, userMessage) => {
+    const apiKey = getCurrentApiKey();
+
+    if (settings.provider === 'anthropic') {
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+          'anthropic-dangerous-direct-browser-access': 'true'
+        },
+        body: JSON.stringify({
+          model: settings.model,
+          max_tokens: 8192,
+          system: systemPrompt,
+          messages: [{ role: 'user', content: userMessage }]
+        })
+      });
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error?.message || `API Error: ${response.status}`);
+      }
+      const data = await response.json();
+      return data.content[0].text;
+    }
+
+    else if (settings.provider === 'openai') {
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          model: settings.model,
+          max_tokens: 8192,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userMessage }
+          ]
+        })
+      });
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error?.message || `API Error: ${response.status}`);
+      }
+      const data = await response.json();
+      return data.choices[0].message.content;
+    }
+
+    else if (settings.provider === 'google') {
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${settings.model}:generateContent?key=${apiKey}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: `${systemPrompt}\n\n${userMessage}` }] }],
+          generationConfig: { maxOutputTokens: 8192 }
+        })
+      });
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error?.message || `API Error: ${response.status}`);
+      }
+      const data = await response.json();
+      return data.candidates[0].content.parts[0].text;
+    }
+  };
+
   // Handle form submission
   const handleSubmit = async (e) => {
     e.preventDefault();
+    const apiKey = getCurrentApiKey();
 
-    if (!settings.anthropicApiKey) {
-      setError('API key not configured. Please go to Settings and add your Anthropic API key.');
+    if (!apiKey) {
+      setError(`API key not configured. Please go to Settings and add your ${MODEL_PROVIDERS[settings.provider].name} API key.`);
       return;
     }
 
@@ -158,30 +278,7 @@ export default function App() {
 
     try {
       const userMessage = buildUserMessage(selectedWorkflow, formData);
-
-      const response = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': settings.anthropicApiKey,
-          'anthropic-version': '2023-06-01',
-          'anthropic-dangerous-direct-browser-access': 'true'
-        },
-        body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514',
-          max_tokens: 8192,
-          system: selectedWorkflow.systemPrompt,
-          messages: [{ role: 'user', content: userMessage }]
-        })
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error?.message || `API Error: ${response.status}`);
-      }
-
-      const data = await response.json();
-      const content = data.content[0].text;
+      const content = await callAPI(selectedWorkflow.systemPrompt, userMessage);
       setRawOutput(content);
       const parsed = parseXMLOutput(content, selectedWorkflow.outputSections);
       setOutput(parsed);
@@ -199,11 +296,63 @@ export default function App() {
     setTimeout(() => setCopiedId(null), 2000);
   };
 
-  // Download CSV for Google Ads
-  const handleDownloadCSV = () => {
+  // Download Google Ads CSVs (separate files per object type)
+  const handleDownloadGoogleAdsCSVs = () => {
+    const dateStr = new Date().toISOString().split('T')[0];
+    const clientName = formData.client_name || 'campaign';
+
+    // Parse the output sections for Google Ads data
     if (output?.csv_data) {
-      const filename = `${formData.client_name || 'campaign'}_google_ads_${new Date().toISOString().split('T')[0]}.csv`;
-      downloadCSV(output.csv_data, filename);
+      downloadCSV(output.csv_data, `${clientName}_google_ads_full_${dateStr}.csv`);
+    }
+
+    // Generate separate CSVs from structured output
+    if (output?.campaign_name) {
+      // Campaign CSV
+      const campaignCSV = `Campaign Name,Campaign Type,Budget,Bid Strategy,Location Target
+"${output.campaign_name}","Search","${formData.monthly_budget || ''}","Maximize Conversions","${formData.target_location || ''}"`;
+      downloadCSV(campaignCSV, `${clientName}_campaigns_${dateStr}.csv`);
+    }
+
+    if (output?.ad_groups) {
+      // Ad Groups CSV - parse from markdown
+      const adGroupLines = output.ad_groups.split('\n').filter(line => line.includes('Ad Group'));
+      if (adGroupLines.length > 0) {
+        let adGroupCSV = 'Campaign,Ad Group,Default Max CPC\n';
+        adGroupLines.forEach(line => {
+          const match = line.match(/Ad Group[:\s]*(.+)/i);
+          if (match) {
+            adGroupCSV += `"${output.campaign_name}","${match[1].trim()}","$2.00"\n`;
+          }
+        });
+        downloadCSV(adGroupCSV, `${clientName}_ad_groups_${dateStr}.csv`);
+      }
+    }
+
+    if (output?.negative_keywords) {
+      // Negative Keywords CSV
+      const negKeywords = output.negative_keywords.split('\n').filter(Boolean);
+      let negKeywordCSV = 'Campaign,Negative Keyword,Match Type\n';
+      negKeywords.forEach(kw => {
+        const cleaned = kw.replace(/^[-•*]\s*/, '').trim();
+        if (cleaned) {
+          negKeywordCSV += `"${output.campaign_name || ''}","${cleaned}","Broad"\n`;
+        }
+      });
+      downloadCSV(negKeywordCSV, `${clientName}_negative_keywords_${dateStr}.csv`);
+    }
+
+    if (output?.extensions) {
+      // Extensions CSV
+      let extensionsCSV = 'Campaign,Extension Type,Extension Text,Final URL\n';
+      const extLines = output.extensions.split('\n').filter(Boolean);
+      extLines.forEach(line => {
+        const cleaned = line.replace(/^[-•*]\s*/, '').trim();
+        if (cleaned && cleaned.length > 2) {
+          extensionsCSV += `"${output.campaign_name || ''}","Sitelink","${cleaned}","${formData.website_url || ''}"\n`;
+        }
+      });
+      downloadCSV(extensionsCSV, `${clientName}_extensions_${dateStr}.csv`);
     }
   };
 
@@ -229,7 +378,7 @@ export default function App() {
       const postData = {
         title: formData.headline || output.meta_title || 'Untitled Post',
         content: output.article,
-        status: 'draft', // Always create as draft for review
+        status: 'draft',
         excerpt: output.meta_description || '',
       };
 
@@ -262,172 +411,160 @@ export default function App() {
   };
 
   // Render Settings Page
-  const renderSettings = () => (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-slate-50 to-blue-50/30">
-      {/* Header */}
-      <header className="bg-white/80 backdrop-blur-lg border-b border-slate-200/80 sticky top-0 z-50">
-        <div className="max-w-3xl mx-auto px-4 sm:px-6 py-4 flex items-center gap-4">
-          <button
-            onClick={() => setCurrentView('dashboard')}
-            className="p-2.5 hover:bg-slate-100 rounded-xl transition-all duration-200 group"
-          >
-            <ArrowLeft className="w-5 h-5 text-slate-500 group-hover:text-slate-700" />
-          </button>
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-gradient-to-br from-slate-600 to-slate-700 rounded-xl flex items-center justify-center shadow-lg shadow-slate-500/20">
-              <Settings className="w-5 h-5 text-white" />
-            </div>
-            <div>
-              <h1 className="text-lg font-bold text-slate-900">Settings</h1>
-              <p className="text-xs text-slate-500">Configure your platform</p>
-            </div>
-          </div>
-        </div>
-      </header>
+  const renderSettings = () => {
+    const currentProvider = MODEL_PROVIDERS[settings.provider];
 
-      <main className="max-w-3xl mx-auto px-4 sm:px-6 py-8">
-        <div className="space-y-6">
-          {/* API Configuration */}
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-            <div className="px-6 py-4 bg-gradient-to-r from-blue-50 to-indigo-50 border-b border-slate-100">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-blue-500 rounded-xl flex items-center justify-center shadow-md shadow-blue-500/30">
-                  <Key className="w-5 h-5 text-white" />
-                </div>
-                <div>
-                  <h2 className="font-semibold text-slate-900">API Configuration</h2>
-                  <p className="text-sm text-slate-500">Connect to Claude AI</p>
+    return (
+      <div className="min-h-screen bg-slate-50">
+        {/* Header */}
+        <header className="bg-white border-b border-slate-200 sticky top-0 z-50">
+          <div className="max-w-3xl mx-auto px-4 py-3 flex items-center gap-3">
+            <button onClick={() => setCurrentView('dashboard')} className="p-2 hover:bg-slate-100 rounded-lg">
+              <ArrowLeft className="w-5 h-5 text-slate-500" />
+            </button>
+            <Settings className="w-5 h-5 text-slate-600" />
+            <h1 className="font-semibold text-slate-900">Settings</h1>
+          </div>
+        </header>
+
+        <main className="max-w-3xl mx-auto px-4 py-6 space-y-4">
+          {/* Model Provider Selection */}
+          <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+            <div className="px-4 py-3 bg-blue-50 border-b border-slate-100 flex items-center gap-2">
+              <Key className="w-4 h-4 text-blue-600" />
+              <span className="font-medium text-slate-900 text-sm">AI Model Configuration</span>
+            </div>
+            <div className="p-4 space-y-4">
+              {/* Provider Selection */}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">Model Provider</label>
+                <div className="grid grid-cols-3 gap-2">
+                  {Object.entries(MODEL_PROVIDERS).map(([key, provider]) => (
+                    <button
+                      key={key}
+                      onClick={() => {
+                        setSettings({
+                          ...settings,
+                          provider: key,
+                          model: provider.models[0].id
+                        });
+                      }}
+                      className={`p-3 rounded-lg border-2 text-left transition-all ${
+                        settings.provider === key
+                          ? 'border-blue-500 bg-blue-50'
+                          : 'border-slate-200 hover:border-slate-300'
+                      }`}
+                    >
+                      <div className="text-lg mb-1">{provider.icon}</div>
+                      <div className="text-sm font-medium text-slate-900">{provider.name.split(' ')[0]}</div>
+                    </button>
+                  ))}
                 </div>
               </div>
-            </div>
-            <div className="p-6">
+
+              {/* Model Selection */}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">Model</label>
+                <select
+                  value={settings.model}
+                  onChange={(e) => setSettings({ ...settings, model: e.target.value })}
+                  className="input bg-white cursor-pointer"
+                >
+                  {currentProvider.models.map(model => (
+                    <option key={model.id} value={model.id}>
+                      {model.name} - {model.description}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* API Key */}
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-2">
-                  Anthropic API Key <span className="text-red-500">*</span>
+                  {currentProvider.name} API Key <span className="text-red-500">*</span>
                 </label>
                 <input
                   type="password"
-                  value={settings.anthropicApiKey}
-                  onChange={(e) => setSettings({ ...settings, anthropicApiKey: e.target.value })}
-                  placeholder="sk-ant-api03-..."
+                  value={settings.apiKeys?.[settings.provider] || ''}
+                  onChange={(e) => setSettings({
+                    ...settings,
+                    apiKeys: { ...settings.apiKeys, [settings.provider]: e.target.value }
+                  })}
+                  placeholder={currentProvider.apiKeyPlaceholder}
                   className="input font-mono text-sm"
                 />
-                <p className="text-sm text-slate-500 mt-2 flex items-center gap-1.5">
-                  <Info className="w-4 h-4" />
-                  Get your API key from{' '}
-                  <a href="https://console.anthropic.com/" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-700 font-medium">
-                    console.anthropic.com
-                  </a>
+                <p className="text-xs text-slate-500 mt-1">
+                  Get your API key from {currentProvider.apiKeyHelp}
                 </p>
               </div>
             </div>
           </div>
 
           {/* WordPress Integration */}
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-            <div className="px-6 py-4 bg-gradient-to-r from-green-50 to-emerald-50 border-b border-slate-100">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-green-500 rounded-xl flex items-center justify-center shadow-md shadow-green-500/30">
-                  <Globe className="w-5 h-5 text-white" />
-                </div>
-                <div>
-                  <h2 className="font-semibold text-slate-900">WordPress Integration</h2>
-                  <p className="text-sm text-slate-500">Publish articles directly to WordPress</p>
-                </div>
-              </div>
+          <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+            <div className="px-4 py-3 bg-green-50 border-b border-slate-100 flex items-center gap-2">
+              <Globe className="w-4 h-4 text-green-600" />
+              <span className="font-medium text-slate-900 text-sm">WordPress Integration</span>
             </div>
-            <div className="p-6 space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2">WordPress Site URL</label>
+            <div className="p-4 space-y-3">
+              <input
+                type="url"
+                value={settings.wordpressUrl}
+                onChange={(e) => setSettings({ ...settings, wordpressUrl: e.target.value })}
+                placeholder="https://your-site.com"
+                className="input text-sm"
+              />
+              <div className="grid grid-cols-2 gap-3">
                 <input
-                  type="url"
-                  value={settings.wordpressUrl}
-                  onChange={(e) => setSettings({ ...settings, wordpressUrl: e.target.value })}
-                  placeholder="https://client-site.com"
-                  className="input"
+                  type="text"
+                  value={settings.wordpressUsername}
+                  onChange={(e) => setSettings({ ...settings, wordpressUsername: e.target.value })}
+                  placeholder="Username"
+                  className="input text-sm"
+                />
+                <input
+                  type="password"
+                  value={settings.wordpressAppPassword}
+                  onChange={(e) => setSettings({ ...settings, wordpressAppPassword: e.target.value })}
+                  placeholder="App Password"
+                  className="input text-sm"
                 />
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-2">Username</label>
-                  <input
-                    type="text"
-                    value={settings.wordpressUsername}
-                    onChange={(e) => setSettings({ ...settings, wordpressUsername: e.target.value })}
-                    placeholder="admin"
-                    className="input"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-2">Application Password</label>
-                  <input
-                    type="password"
-                    value={settings.wordpressAppPassword}
-                    onChange={(e) => setSettings({ ...settings, wordpressAppPassword: e.target.value })}
-                    placeholder="xxxx xxxx xxxx xxxx"
-                    className="input"
-                  />
-                </div>
-              </div>
-              <p className="text-sm text-slate-500 flex items-start gap-1.5">
-                <Info className="w-4 h-4 mt-0.5 flex-shrink-0" />
-                Generate an Application Password in WordPress: Users &rarr; Profile &rarr; Application Passwords
-              </p>
             </div>
           </div>
 
           {/* Default Values */}
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-            <div className="px-6 py-4 bg-gradient-to-r from-purple-50 to-violet-50 border-b border-slate-100">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-purple-500 rounded-xl flex items-center justify-center shadow-md shadow-purple-500/30">
-                  <Database className="w-5 h-5 text-white" />
-                </div>
-                <div>
-                  <h2 className="font-semibold text-slate-900">Default Values</h2>
-                  <p className="text-sm text-slate-500">Pre-fill common fields automatically</p>
-                </div>
-              </div>
+          <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+            <div className="px-4 py-3 bg-purple-50 border-b border-slate-100 flex items-center gap-2">
+              <Database className="w-4 h-4 text-purple-600" />
+              <span className="font-medium text-slate-900 text-sm">Default Values</span>
             </div>
-            <div className="p-6 space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2">Default Client Name</label>
-                <input
-                  type="text"
-                  value={settings.defaultClientName}
-                  onChange={(e) => setSettings({ ...settings, defaultClientName: e.target.value })}
-                  placeholder="Martinez & Associates"
-                  className="input"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2">Default Location</label>
-                <input
-                  type="text"
-                  value={settings.defaultLocation}
-                  onChange={(e) => setSettings({ ...settings, defaultLocation: e.target.value })}
-                  placeholder="Phoenix, Arizona"
-                  className="input"
-                />
-              </div>
+            <div className="p-4 space-y-3">
+              <input
+                type="text"
+                value={settings.defaultClientName}
+                onChange={(e) => setSettings({ ...settings, defaultClientName: e.target.value })}
+                placeholder="Default Client Name"
+                className="input text-sm"
+              />
+              <input
+                type="text"
+                value={settings.defaultLocation}
+                onChange={(e) => setSettings({ ...settings, defaultLocation: e.target.value })}
+                placeholder="Default Location"
+                className="input text-sm"
+              />
             </div>
           </div>
 
           {/* Save Button */}
-          <button
-            onClick={saveSettings}
-            className="w-full py-4 btn btn-primary rounded-xl text-base"
-          >
-            {settingsSaved ? (
-              <><Check className="w-5 h-5" /> Settings Saved!</>
-            ) : (
-              <><Save className="w-5 h-5" /> Save Settings</>
-            )}
+          <button onClick={saveSettings} className="w-full py-3 btn btn-primary rounded-xl">
+            {settingsSaved ? <><Check className="w-4 h-4" /> Saved!</> : <><Save className="w-4 h-4" /> Save Settings</>}
           </button>
-        </div>
-      </main>
-    </div>
-  );
+        </main>
+      </div>
+    );
+  };
 
   // Render Dashboard
   const renderDashboard = () => {
@@ -437,119 +574,75 @@ export default function App() {
       groupedWorkflows[w.category].push(w);
     });
 
-    const hasApiKey = !!settings.anthropicApiKey;
-
-    // Statistics
+    const hasApiKey = !!getCurrentApiKey();
     const totalWorkflows = workflows.length;
-    const categoryCount = Object.keys(categories).length;
+    const currentProvider = MODEL_PROVIDERS[settings.provider];
 
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-slate-50 to-blue-50/30">
+      <div className="min-h-screen bg-slate-50">
         {/* Header */}
-        <header className="bg-white/80 backdrop-blur-lg border-b border-slate-200/80 sticky top-0 z-50">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div className="flex items-center justify-between h-16">
-              <div className="flex items-center gap-4">
-                <div className="w-11 h-11 bg-gradient-to-br from-blue-600 to-indigo-700 rounded-xl flex items-center justify-center shadow-lg shadow-blue-500/30">
-                  <Sparkles className="w-6 h-6 text-white" />
-                </div>
-                <div>
-                  <h1 className="text-lg font-bold text-slate-900">Attorney Sync AI</h1>
-                  <p className="text-xs text-slate-500">Legal Marketing Automation</p>
-                </div>
-              </div>
-              <div className="flex items-center gap-3">
-                <div className="hidden md:flex items-center gap-2 px-3 py-1.5 bg-slate-100 rounded-lg">
-                  <Zap className="w-4 h-4 text-amber-500" />
-                  <span className="text-sm font-medium text-slate-600">{totalWorkflows} Workflows</span>
-                </div>
-                <button
-                  onClick={() => setCurrentView('settings')}
-                  className="p-2.5 hover:bg-slate-100 rounded-xl transition-all duration-200 group"
-                  title="Settings"
-                >
-                  <Settings className="w-5 h-5 text-slate-500 group-hover:text-slate-700" />
-                </button>
-              </div>
+        <header className="bg-white border-b border-slate-200 sticky top-0 z-50">
+          <div className="max-w-6xl mx-auto px-4 h-12 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Sparkles className="w-5 h-5 text-blue-600" />
+              <span className="font-bold text-slate-900">Attorney Sync AI</span>
+              <span className="text-xs text-slate-400 hidden sm:inline">| {totalWorkflows} Workflows</span>
+            </div>
+            <div className="flex items-center gap-2">
+              {hasApiKey && (
+                <span className="text-xs px-2 py-1 bg-slate-100 rounded text-slate-600">
+                  {currentProvider.icon} {settings.model.split('-').slice(0, 2).join(' ')}
+                </span>
+              )}
+              <button onClick={() => setCurrentView('settings')} className="p-2 hover:bg-slate-100 rounded-lg">
+                <Settings className="w-4 h-4 text-slate-500" />
+              </button>
             </div>
           </div>
         </header>
 
-        <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <main className="max-w-6xl mx-auto px-4 py-4">
           {/* API Key Warning */}
           {!hasApiKey && (
-            <div className="bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-2xl p-5 mb-8 flex items-start gap-4 shadow-sm animate-fadeIn">
-              <div className="w-10 h-10 bg-amber-500 rounded-xl flex items-center justify-center flex-shrink-0 shadow-md shadow-amber-500/30">
-                <AlertCircle className="w-5 h-5 text-white" />
-              </div>
-              <div>
-                <p className="font-semibold text-amber-900">API Key Required</p>
-                <p className="text-sm text-amber-700 mt-1">
-                  Please configure your Anthropic API key in{' '}
-                  <button onClick={() => setCurrentView('settings')} className="underline font-semibold hover:text-amber-800 transition-colors">
-                    Settings
-                  </button>{' '}
-                  to start using the workflows.
-                </p>
-              </div>
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4 flex items-center gap-3 text-sm">
+              <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0" />
+              <span className="text-amber-800">
+                Configure your API key in{' '}
+                <button onClick={() => setCurrentView('settings')} className="underline font-medium">Settings</button>
+              </span>
             </div>
           )}
 
-          {/* Hero Section */}
-          <div className="relative bg-gradient-to-br from-blue-600 via-blue-700 to-indigo-800 rounded-2xl p-6 md:p-8 mb-8 text-white overflow-hidden shadow-xl shadow-blue-500/25">
-            {/* Background decoration */}
-            <div className="absolute top-0 right-0 w-64 h-64 bg-white/5 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2" />
-
-            <div className="relative flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+          {/* Compact Hero */}
+          <div className="bg-gradient-to-r from-blue-600 to-indigo-700 rounded-xl p-4 mb-4 text-white">
+            <div className="flex items-center justify-between">
               <div>
-                <div className="flex items-center gap-3 mb-2">
-                  <h2 className="text-2xl md:text-3xl font-bold">
-                    AI-Powered Legal Marketing
-                  </h2>
-                  <span className="px-2 py-0.5 bg-white/20 rounded-full text-xs font-medium backdrop-blur-sm hidden sm:inline">
-                    Claude AI
-                  </span>
-                </div>
-                <p className="text-blue-100 text-sm md:text-base max-w-xl">
-                  {totalWorkflows} professional workflows for content, campaigns, and operations.
-                </p>
+                <h2 className="text-lg font-bold">AI-Powered Legal Marketing</h2>
+                <p className="text-blue-100 text-sm">{totalWorkflows} workflows for content, ads & operations</p>
               </div>
-
-              {/* Quick stats */}
-              <div className="flex flex-wrap gap-2">
-                <div className="flex items-center gap-1.5 px-3 py-1.5 bg-white/10 rounded-lg backdrop-blur-sm text-sm">
-                  <FileText className="w-4 h-4" />
-                  <span className="font-medium">{totalWorkflows} Workflows</span>
-                </div>
-                <div className="flex items-center gap-1.5 px-3 py-1.5 bg-white/10 rounded-lg backdrop-blur-sm text-sm">
-                  <Layers className="w-4 h-4" />
-                  <span className="font-medium">{categoryCount} Categories</span>
-                </div>
+              <div className="hidden sm:flex items-center gap-2 text-xs">
+                <span className="px-2 py-1 bg-white/20 rounded">{totalWorkflows} Workflows</span>
+                <span className="px-2 py-1 bg-white/20 rounded">{Object.keys(categories).length} Categories</span>
               </div>
             </div>
           </div>
 
-          {/* Workflow Categories */}
-          <div className="space-y-6">
+          {/* Workflow Categories - Ultra Compact */}
+          <div className="space-y-3">
             {Object.entries(groupedWorkflows).map(([categoryId, categoryWorkflows]) => {
               const category = categories[categoryId];
               const Icon = iconMap[category.icon] || FileText;
               return (
-                <div key={categoryId} className="animate-fadeIn">
+                <div key={categoryId}>
                   {/* Category Header */}
-                  <div className="flex items-center gap-2 mb-3">
-                    <div
-                      className="w-9 h-9 rounded-xl flex items-center justify-center"
-                      style={{ backgroundColor: category.color + '15' }}
-                    >
-                      <Icon className="w-5 h-5" style={{ color: category.color }} />
-                    </div>
-                    <h3 className="text-base font-bold text-slate-900">{category.name}</h3>
-                    <span className="text-xs text-slate-400 ml-1">({categoryWorkflows.length})</span>
+                  <div className="flex items-center gap-2 mb-2">
+                    <Icon className="w-4 h-4" style={{ color: category.color }} />
+                    <span className="text-sm font-semibold text-slate-700">{category.name}</span>
+                    <span className="text-xs text-slate-400">({categoryWorkflows.length})</span>
                   </div>
 
-                  {/* Workflow Cards Grid */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 stagger">
+                  {/* Workflow Grid - Very Compact */}
+                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2">
                     {categoryWorkflows.map(workflow => {
                       const WIcon = iconMap[workflow.icon] || FileText;
                       return (
@@ -557,23 +650,13 @@ export default function App() {
                           key={workflow.id}
                           onClick={() => selectWorkflow(workflow)}
                           disabled={!hasApiKey}
-                          className="bg-white rounded-xl p-4 border border-slate-200 hover:border-blue-300 hover:shadow-lg transition-all duration-200 text-left group disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:shadow-none disabled:hover:border-slate-200"
-                          style={{ transform: 'translateY(0)' }}
-                          onMouseEnter={(e) => { if (hasApiKey) e.currentTarget.style.transform = 'translateY(-2px)'; }}
-                          onMouseLeave={(e) => { e.currentTarget.style.transform = 'translateY(0)'; }}
+                          className="bg-white rounded-lg p-2.5 border border-slate-200 hover:border-blue-300 hover:shadow transition-all text-left group disabled:opacity-50 disabled:cursor-not-allowed"
                         >
-                          <div className="flex items-start gap-3">
-                            <div
-                              className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 transition-transform group-hover:scale-105 duration-200"
-                              style={{ backgroundColor: workflow.color + '12' }}
-                            >
-                              <WIcon className="w-5 h-5" style={{ color: workflow.color }} />
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <h4 className="font-semibold text-slate-900 text-sm leading-tight group-hover:text-blue-700 transition-colors">{workflow.name}</h4>
-                              <p className="text-xs text-slate-500 line-clamp-2 mt-1">{workflow.description}</p>
-                            </div>
-                            <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-blue-500 flex-shrink-0 mt-0.5" />
+                          <div className="flex items-center gap-2">
+                            <WIcon className="w-4 h-4 flex-shrink-0" style={{ color: workflow.color }} />
+                            <span className="text-xs font-medium text-slate-800 truncate group-hover:text-blue-700">
+                              {workflow.name}
+                            </span>
                           </div>
                         </button>
                       );
@@ -585,10 +668,8 @@ export default function App() {
           </div>
 
           {/* Footer */}
-          <footer className="mt-10 pt-6 border-t border-slate-200 text-center">
-            <p className="text-xs text-slate-400">
-              Attorney Sync AI &middot; Legal Marketing Automation &middot; Powered by Claude
-            </p>
+          <footer className="mt-6 pt-4 border-t border-slate-200 text-center">
+            <p className="text-xs text-slate-400">Attorney Sync AI · Powered by {currentProvider.name}</p>
           </footer>
         </main>
       </div>
@@ -601,315 +682,279 @@ export default function App() {
     const Icon = iconMap[selectedWorkflow.icon] || FileText;
     const showWordPressButton = selectedWorkflow.outputActions?.includes('publish_wordpress');
     const showCSVDownload = selectedWorkflow.outputActions?.includes('download_csv');
+    const isGoogleAds = selectedWorkflow.id === 'google-ads-campaign-builder';
+    const currentProvider = MODEL_PROVIDERS[settings.provider];
 
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-slate-50 to-blue-50/30">
+      <div className="min-h-screen bg-slate-50">
         {/* Header */}
-        <header className="bg-white/80 backdrop-blur-lg border-b border-slate-200/80 sticky top-0 z-50">
-          <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div className="flex items-center h-16 gap-4">
-              <button
-                onClick={() => { setCurrentView('dashboard'); setOutput(null); }}
-                className="p-2.5 hover:bg-slate-100 rounded-xl transition-all duration-200 group"
-              >
-                <ArrowLeft className="w-5 h-5 text-slate-500 group-hover:text-slate-700" />
-              </button>
-              <div
-                className="w-11 h-11 rounded-xl flex items-center justify-center shadow-md"
-                style={{
-                  backgroundColor: selectedWorkflow.color + '15',
-                  boxShadow: `0 4px 14px ${selectedWorkflow.color}20`
-                }}
-              >
-                <Icon className="w-6 h-6" style={{ color: selectedWorkflow.color }} />
-              </div>
-              <div className="flex-1 min-w-0">
-                <h1 className="font-bold text-slate-900 truncate">{selectedWorkflow.name}</h1>
-                <div className="flex items-center gap-2 text-xs text-slate-500">
-                  <span>{categories[selectedWorkflow.category].name}</span>
-                  <span className="text-slate-300">&bull;</span>
-                  <span className="badge badge-gray text-xs py-0">{selectedWorkflow.proposalRef}</span>
-                </div>
-              </div>
-            </div>
+        <header className="bg-white border-b border-slate-200 sticky top-0 z-50">
+          <div className="max-w-6xl mx-auto px-4 h-12 flex items-center gap-3">
+            <button onClick={() => { setCurrentView('dashboard'); setOutput(null); }} className="p-2 hover:bg-slate-100 rounded-lg">
+              <ArrowLeft className="w-4 h-4 text-slate-500" />
+            </button>
+            <Icon className="w-5 h-5" style={{ color: selectedWorkflow.color }} />
+            <span className="font-semibold text-slate-900 truncate">{selectedWorkflow.name}</span>
+            <span className="text-xs text-slate-400 hidden sm:inline">· {categories[selectedWorkflow.category].name}</span>
           </div>
         </header>
 
-        <main className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-            {/* Input Form */}
-            <div className="animate-fadeIn">
-              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-                <div className="px-6 py-4 bg-gradient-to-r from-slate-50 to-slate-100 border-b border-slate-100">
-                  <h2 className="font-semibold text-slate-900">Workflow Inputs</h2>
-                  <p className="text-sm text-slate-500 mt-0.5">Fill in the details to generate output</p>
-                </div>
-                <form onSubmit={handleSubmit} className="p-6 space-y-5">
-                  {selectedWorkflow.inputs.map(input => (
-                    <div key={input.id}>
-                      <label className="block text-sm font-medium text-slate-700 mb-2">
-                        {input.label}
-                        {input.required && <span className="text-red-500 ml-1">*</span>}
-                      </label>
-
-                      {input.type === 'text' && (
-                        <input
-                          type="text"
-                          value={formData[input.id] || ''}
-                          onChange={(e) => handleInputChange(input.id, e.target.value)}
-                          placeholder={input.placeholder}
-                          required={input.required}
-                          className="input"
-                        />
-                      )}
-
-                      {input.type === 'textarea' && (
-                        <textarea
-                          value={formData[input.id] || ''}
-                          onChange={(e) => handleInputChange(input.id, e.target.value)}
-                          placeholder={input.placeholder}
-                          required={input.required}
-                          rows={input.rows || 4}
-                          className="input resize-none"
-                        />
-                      )}
-
-                      {input.type === 'select' && (
-                        <select
-                          value={formData[input.id] || ''}
-                          onChange={(e) => handleInputChange(input.id, e.target.value)}
-                          required={input.required}
-                          className="input bg-white cursor-pointer"
-                        >
-                          <option value="">Select an option...</option>
-                          {input.options.map(opt => (
-                            <option key={opt} value={opt}>{opt}</option>
-                          ))}
-                        </select>
-                      )}
-
-                      {input.type === 'multiselect' && (
-                        <div className="flex flex-wrap gap-2">
-                          {input.options.map(opt => {
-                            const selected = (formData[input.id] || []).includes(opt);
-                            return (
-                              <button
-                                key={opt}
-                                type="button"
-                                onClick={() => {
-                                  const current = formData[input.id] || [];
-                                  if (selected) {
-                                    handleInputChange(input.id, current.filter(v => v !== opt));
-                                  } else {
-                                    handleInputChange(input.id, [...current, opt]);
-                                  }
-                                }}
-                                className={`chip ${selected ? 'chip-selected' : 'chip-default'}`}
-                              >
-                                {selected && <Check className="w-3.5 h-3.5 -ml-0.5" />}
-                                {opt}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      )}
-
-                      {input.type === 'checkbox' && (
-                        <label className="flex items-center gap-3 cursor-pointer group">
-                          <div className="relative">
-                            <input
-                              type="checkbox"
-                              checked={formData[input.id] ?? input.default ?? false}
-                              onChange={(e) => handleInputChange(input.id, e.target.checked)}
-                              className="peer sr-only"
-                            />
-                            <div className="w-5 h-5 border-2 border-slate-300 rounded-md peer-checked:bg-blue-600 peer-checked:border-blue-600 transition-all" />
-                            <Check className="absolute top-0.5 left-0.5 w-4 h-4 text-white opacity-0 peer-checked:opacity-100 transition-opacity" />
-                          </div>
-                          <span className="text-sm text-slate-600 group-hover:text-slate-900 transition-colors">Yes, include this</span>
-                        </label>
-                      )}
-
-                      {input.helpText && (
-                        <p className="text-sm text-slate-500 mt-2 flex items-start gap-1.5">
-                          <Info className="w-4 h-4 mt-0.5 flex-shrink-0 text-slate-400" />
-                          {input.helpText}
-                        </p>
-                      )}
-                    </div>
-                  ))}
-
-                  {error && (
-                    <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm flex items-start gap-3 animate-fadeIn">
-                      <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
-                      <div>
-                        <p className="font-medium">Error</p>
-                        <p className="mt-0.5">{error}</p>
-                      </div>
-                    </div>
-                  )}
-
-                  <button
-                    type="submit"
-                    disabled={loading}
-                    className="w-full py-4 btn btn-primary rounded-xl text-base"
-                  >
-                    {loading ? (
-                      <><Loader2 className="w-5 h-5 animate-spin" /> Generating with Claude AI...</>
-                    ) : (
-                      <><Sparkles className="w-5 h-5" /> Generate Output</>
-                    )}
-                  </button>
-                </form>
+        <main className="max-w-6xl mx-auto px-4 py-4">
+          {/* System Prompt Section */}
+          <div className="bg-white rounded-lg border border-slate-200 mb-4 overflow-hidden">
+            <button
+              onClick={() => setShowSystemPrompt(!showSystemPrompt)}
+              className="w-full px-4 py-2.5 flex items-center justify-between hover:bg-slate-50 transition-colors"
+            >
+              <div className="flex items-center gap-2">
+                <Code className="w-4 h-4 text-slate-500" />
+                <span className="text-sm font-medium text-slate-700">System Prompt</span>
               </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={(e) => { e.stopPropagation(); copyToClipboard(selectedWorkflow.systemPrompt, 'system-prompt'); }}
+                  className="p-1.5 hover:bg-slate-200 rounded transition-colors"
+                  title="Copy system prompt"
+                >
+                  {copiedId === 'system-prompt' ? (
+                    <Check className="w-3.5 h-3.5 text-green-500" />
+                  ) : (
+                    <Copy className="w-3.5 h-3.5 text-slate-400" />
+                  )}
+                </button>
+                {showSystemPrompt ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
+              </div>
+            </button>
+            {showSystemPrompt && (
+              <div className="px-4 pb-4">
+                <pre className="bg-slate-900 text-slate-100 p-3 rounded-lg text-xs font-mono whitespace-pre-wrap overflow-x-auto max-h-64">
+                  {selectedWorkflow.systemPrompt}
+                </pre>
+              </div>
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {/* Input Form */}
+            <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
+              <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-100">
+                <span className="text-sm font-medium text-slate-700">Inputs</span>
+              </div>
+              <form onSubmit={handleSubmit} className="p-4 space-y-4">
+                {selectedWorkflow.inputs.map(input => (
+                  <div key={input.id}>
+                    <label className="block text-xs font-medium text-slate-600 mb-1.5">
+                      {input.label}{input.required && <span className="text-red-500">*</span>}
+                    </label>
+
+                    {input.type === 'text' && (
+                      <input
+                        type="text"
+                        value={formData[input.id] || ''}
+                        onChange={(e) => handleInputChange(input.id, e.target.value)}
+                        placeholder={input.placeholder}
+                        required={input.required}
+                        className="input text-sm py-2"
+                      />
+                    )}
+
+                    {input.type === 'textarea' && (
+                      <textarea
+                        value={formData[input.id] || ''}
+                        onChange={(e) => handleInputChange(input.id, e.target.value)}
+                        placeholder={input.placeholder}
+                        required={input.required}
+                        rows={input.rows || 3}
+                        className="input text-sm py-2 resize-none"
+                      />
+                    )}
+
+                    {input.type === 'select' && (
+                      <select
+                        value={formData[input.id] || ''}
+                        onChange={(e) => handleInputChange(input.id, e.target.value)}
+                        required={input.required}
+                        className="input text-sm py-2 bg-white"
+                      >
+                        <option value="">Select...</option>
+                        {input.options.map(opt => (
+                          <option key={opt} value={opt}>{opt}</option>
+                        ))}
+                      </select>
+                    )}
+
+                    {input.type === 'multiselect' && (
+                      <div className="flex flex-wrap gap-1.5">
+                        {input.options.map(opt => {
+                          const selected = (formData[input.id] || []).includes(opt);
+                          return (
+                            <button
+                              key={opt}
+                              type="button"
+                              onClick={() => {
+                                const current = formData[input.id] || [];
+                                handleInputChange(input.id, selected ? current.filter(v => v !== opt) : [...current, opt]);
+                              }}
+                              className={`px-2 py-1 text-xs rounded-md border transition-colors ${
+                                selected ? 'bg-blue-50 border-blue-300 text-blue-700' : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'
+                              }`}
+                            >
+                              {opt}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {input.type === 'checkbox' && (
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={formData[input.id] ?? input.default ?? false}
+                          onChange={(e) => handleInputChange(input.id, e.target.checked)}
+                          className="w-4 h-4 rounded border-slate-300"
+                        />
+                        <span className="text-sm text-slate-600">Yes</span>
+                      </label>
+                    )}
+                  </div>
+                ))}
+
+                {error && (
+                  <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-xs flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                    {error}
+                  </div>
+                )}
+
+                <button type="submit" disabled={loading} className="w-full py-2.5 btn btn-primary rounded-lg text-sm">
+                  {loading ? (
+                    <><Loader2 className="w-4 h-4 animate-spin" /> Generating...</>
+                  ) : (
+                    <><Sparkles className="w-4 h-4" /> Generate with {currentProvider.icon}</>
+                  )}
+                </button>
+              </form>
             </div>
 
             {/* Output Display */}
-            <div className="animate-fadeIn" style={{ animationDelay: '0.1s' }}>
-              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden min-h-[600px]">
-                <div className="px-6 py-4 bg-gradient-to-r from-slate-50 to-slate-100 border-b border-slate-100 flex items-center justify-between">
-                  <div>
-                    <h2 className="font-semibold text-slate-900">Generated Output</h2>
-                    <p className="text-sm text-slate-500 mt-0.5">AI-generated content ready for use</p>
+            <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
+              <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
+                <span className="text-sm font-medium text-slate-700">Output</span>
+                {output && (
+                  <div className="flex items-center gap-1">
+                    {isGoogleAds && (
+                      <button
+                        onClick={handleDownloadGoogleAdsCSVs}
+                        className="px-2 py-1 text-xs bg-green-50 text-green-700 rounded hover:bg-green-100 flex items-center gap-1"
+                      >
+                        <Download className="w-3 h-3" /> CSVs
+                      </button>
+                    )}
+                    {showCSVDownload && !isGoogleAds && output.csv_data && (
+                      <button
+                        onClick={() => downloadCSV(output.csv_data, `export_${new Date().toISOString().split('T')[0]}.csv`)}
+                        className="px-2 py-1 text-xs bg-green-50 text-green-700 rounded hover:bg-green-100 flex items-center gap-1"
+                      >
+                        <Download className="w-3 h-3" /> CSV
+                      </button>
+                    )}
+                    {showWordPressButton && output.article && (
+                      <button
+                        onClick={publishToWordPress}
+                        disabled={publishingToWP}
+                        className="px-2 py-1 text-xs bg-purple-50 text-purple-700 rounded hover:bg-purple-100 flex items-center gap-1 disabled:opacity-50"
+                      >
+                        {publishingToWP ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />} WP
+                      </button>
+                    )}
                   </div>
-                  {output && (
-                    <div className="flex items-center gap-2">
-                      {showCSVDownload && output.csv_data && (
-                        <button
-                          onClick={handleDownloadCSV}
-                          className="px-4 py-2 text-sm bg-green-50 text-green-700 rounded-lg hover:bg-green-100 flex items-center gap-2 font-medium transition-colors"
-                        >
-                          <Download className="w-4 h-4" /> Download CSV
-                        </button>
-                      )}
-                      {showWordPressButton && output.article && (
-                        <button
-                          onClick={publishToWordPress}
-                          disabled={publishingToWP}
-                          className="px-4 py-2 text-sm bg-purple-50 text-purple-700 rounded-lg hover:bg-purple-100 flex items-center gap-2 font-medium transition-colors disabled:opacity-50"
-                        >
-                          {publishingToWP ? (
-                            <><Loader2 className="w-4 h-4 animate-spin" /> Publishing...</>
-                          ) : (
-                            <><Upload className="w-4 h-4" /> Publish to WP</>
-                          )}
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </div>
+                )}
+              </div>
 
-                <div className="p-6">
-                  {wpPublishResult && (
-                    <div className={`p-4 rounded-xl mb-6 flex items-start gap-3 animate-fadeIn ${
-                      wpPublishResult.success
-                        ? 'bg-green-50 border border-green-200 text-green-700'
-                        : 'bg-red-50 border border-red-200 text-red-700'
-                    }`}>
-                      {wpPublishResult.success ? (
-                        <Check className="w-5 h-5 flex-shrink-0 mt-0.5" />
-                      ) : (
-                        <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
-                      )}
-                      <div>
-                        <p className="font-medium">{wpPublishResult.success ? 'Success!' : 'Error'}</p>
-                        <p className="text-sm mt-0.5">{wpPublishResult.message}</p>
-                        {wpPublishResult.editUrl && (
-                          <a
-                            href={wpPublishResult.editUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1 text-sm font-medium mt-2 hover:underline"
-                          >
-                            View Draft <ExternalLink className="w-3 h-3" />
-                          </a>
-                        )}
-                      </div>
-                    </div>
-                  )}
+              <div className="p-4 min-h-[400px]">
+                {wpPublishResult && (
+                  <div className={`p-2 rounded-lg mb-3 text-xs flex items-center gap-2 ${
+                    wpPublishResult.success ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'
+                  }`}>
+                    {wpPublishResult.success ? <Check className="w-3 h-3" /> : <AlertCircle className="w-3 h-3" />}
+                    {wpPublishResult.message}
+                  </div>
+                )}
 
-                  {!output && !loading && (
-                    <div className="flex items-center justify-center h-[400px] text-slate-400">
-                      <div className="text-center">
-                        <div className="w-20 h-20 mx-auto mb-4 bg-slate-100 rounded-2xl flex items-center justify-center">
-                          <Sparkles className="w-10 h-10 text-slate-300" />
-                        </div>
-                        <p className="text-lg font-medium text-slate-600 mb-1">Ready to Generate</p>
-                        <p className="text-sm text-slate-400">Fill in the inputs and click Generate</p>
-                      </div>
+                {!output && !loading && (
+                  <div className="flex items-center justify-center h-[300px] text-slate-400">
+                    <div className="text-center">
+                      <Sparkles className="w-8 h-8 mx-auto mb-2 text-slate-300" />
+                      <p className="text-sm">Fill inputs and generate</p>
                     </div>
-                  )}
+                  </div>
+                )}
 
-                  {loading && (
-                    <div className="flex items-center justify-center h-[400px]">
-                      <div className="text-center">
-                        <div className="w-20 h-20 mx-auto mb-4 bg-blue-50 rounded-2xl flex items-center justify-center">
-                          <Loader2 className="w-10 h-10 text-blue-500 animate-spin" />
-                        </div>
-                        <p className="text-lg font-medium text-slate-900 mb-1">Generating Content</p>
-                        <p className="text-sm text-slate-500">Powered by Claude AI</p>
-                        <p className="text-xs text-slate-400 mt-2">Estimated: {selectedWorkflow.estimatedTime}</p>
-                      </div>
+                {loading && (
+                  <div className="flex items-center justify-center h-[300px]">
+                    <div className="text-center">
+                      <Loader2 className="w-8 h-8 mx-auto mb-2 text-blue-500 animate-spin" />
+                      <p className="text-sm text-slate-600">Generating with {currentProvider.name}...</p>
                     </div>
-                  )}
+                  </div>
+                )}
 
-                  {output && (
-                    <div className="space-y-6 max-h-[600px] overflow-y-auto pr-2">
-                      {selectedWorkflow.outputSections.map(section => {
-                        const content = output[section.id];
-                        if (!content) return null;
-                        return (
-                          <div key={section.id} className="pb-6 border-b border-slate-100 last:border-0 last:pb-0 animate-fadeIn">
-                            <div className="flex items-center justify-between mb-3">
-                              <h3 className="font-semibold text-slate-800">{section.label}</h3>
-                              <button
-                                onClick={() => copyToClipboard(content, section.id)}
-                                className="p-2 hover:bg-slate-100 rounded-lg transition-all duration-200 group"
-                                title="Copy to clipboard"
-                              >
-                                {copiedId === section.id ? (
-                                  <Check className="w-4 h-4 text-green-500" />
-                                ) : (
-                                  <Copy className="w-4 h-4 text-slate-400 group-hover:text-slate-600" />
-                                )}
-                              </button>
-                            </div>
-                            <div className="text-sm text-slate-600">
-                              {section.format === 'code' ? (
-                                <pre className="bg-slate-900 text-slate-100 p-4 rounded-xl overflow-x-auto text-xs font-mono whitespace-pre-wrap">
-                                  {content}
-                                </pre>
-                              ) : section.format === 'list' ? (
-                                <ul className="space-y-2">
-                                  {content.split('\n').filter(Boolean).map((item, i) => (
-                                    <li key={i} className="flex items-start gap-2">
-                                      <div className="w-1.5 h-1.5 rounded-full bg-blue-500 mt-2 flex-shrink-0" />
-                                      <span>{item.replace(/^[-•*]\s*/, '').replace(/^\d+\.\s*/, '')}</span>
-                                    </li>
-                                  ))}
-                                </ul>
-                              ) : section.format === 'tags' ? (
-                                <div className="flex flex-wrap gap-2">
-                                  {content.split(',').map((tag, i) => (
-                                    <span key={i} className="badge badge-blue">
-                                      {tag.trim()}
-                                    </span>
-                                  ))}
-                                </div>
-                              ) : section.format === 'markdown' ? (
-                                <div className="prose prose-sm max-w-none">
-                                  <ReactMarkdown>{content}</ReactMarkdown>
-                                </div>
+                {output && (
+                  <div className="space-y-4 max-h-[500px] overflow-y-auto">
+                    {selectedWorkflow.outputSections.map(section => {
+                      const content = output[section.id];
+                      if (!content) return null;
+                      return (
+                        <div key={section.id} className="pb-3 border-b border-slate-100 last:border-0">
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-xs font-medium text-slate-700">{section.label}</span>
+                            <button
+                              onClick={() => copyToClipboard(content, section.id)}
+                              className="p-1 hover:bg-slate-100 rounded"
+                            >
+                              {copiedId === section.id ? (
+                                <Check className="w-3 h-3 text-green-500" />
                               ) : (
-                                <div className="whitespace-pre-wrap bg-slate-50 p-4 rounded-xl">{content}</div>
+                                <Copy className="w-3 h-3 text-slate-400" />
                               )}
-                            </div>
+                            </button>
                           </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
+                          <div className="text-xs text-slate-600">
+                            {section.format === 'code' ? (
+                              <pre className="bg-slate-900 text-slate-100 p-2 rounded text-xs font-mono whitespace-pre-wrap overflow-x-auto">
+                                {content}
+                              </pre>
+                            ) : section.format === 'list' ? (
+                              <ul className="space-y-1">
+                                {content.split('\n').filter(Boolean).map((item, i) => (
+                                  <li key={i} className="flex items-start gap-1.5">
+                                    <span className="text-blue-500 mt-0.5">•</span>
+                                    <span>{item.replace(/^[-•*]\s*/, '').replace(/^\d+\.\s*/, '')}</span>
+                                  </li>
+                                ))}
+                              </ul>
+                            ) : section.format === 'tags' ? (
+                              <div className="flex flex-wrap gap-1">
+                                {content.split(',').map((tag, i) => (
+                                  <span key={i} className="px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded text-xs">
+                                    {tag.trim()}
+                                  </span>
+                                ))}
+                              </div>
+                            ) : section.format === 'markdown' ? (
+                              <div className="prose prose-sm max-w-none">
+                                <ReactMarkdown>{content}</ReactMarkdown>
+                              </div>
+                            ) : (
+                              <div className="whitespace-pre-wrap bg-slate-50 p-2 rounded">{content}</div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             </div>
           </div>
