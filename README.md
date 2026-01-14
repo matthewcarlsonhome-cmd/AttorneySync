@@ -2,7 +2,7 @@
 
 **AI-Powered Legal Marketing Automation Platform**
 
-A white-label, config-driven AI workflow platform built specifically for legal marketing teams. Generate content, analyze markets, build campaigns, and streamline operations—all powered by Claude AI.
+A white-label, config-driven AI workflow platform built specifically for legal marketing teams. Generate content, analyze markets, build campaigns, and streamline operations—powered by your choice of Claude, ChatGPT, or Gemini.
 
 ---
 
@@ -11,16 +11,17 @@ A white-label, config-driven AI workflow platform built specifically for legal m
 ### Core Capabilities
 
 - **12 Pre-built Workflows** — Complete coverage of legal marketing operations from content creation to client onboarding
-- **Real-time AI Generation** — Powered by Claude Sonnet for fast, high-quality outputs
+- **Multi-Model Support** — Choose between Claude (Anthropic), ChatGPT (OpenAI), or Gemini (Google)
+- **Model Selection** — Pick from multiple model versions per provider (Sonnet/Opus, GPT-4o/GPT-4, Gemini Pro/Flash)
+- **System Prompt Visibility** — View and copy the system prompt for any workflow
 - **Config-driven Architecture** — Add new workflows without code changes
-- **Professional UI** — Clean, modern interface with glassmorphism effects and smooth animations
 - **Copy-to-Clipboard** — One-click copy for all generated outputs
-- **Responsive Design** — Fully responsive across desktop, tablet, and mobile
+- **Compact UI** — Dense, efficient layout showing all workflows at a glance
 
 ### Integrations
 
 - **WordPress Publishing** — Publish articles directly as drafts to client WordPress sites
-- **Google Ads CSV Export** — Download campaign-ready CSV files for Google Ads Editor upload
+- **Google Ads CSV Export** — Download separate CSVs per object level (Campaign, Ad Groups, Keywords, Negative Keywords, Extensions)
 - **Local Storage** — Settings and preferences persist across sessions
 
 ### Design System
@@ -92,7 +93,15 @@ A white-label, config-driven AI workflow platform built specifically for legal m
 | **Styling** | Tailwind CSS 3.3.6 | Utility-first responsive design |
 | **Icons** | Lucide React 0.294 | Professional icon library |
 | **Markdown** | React Markdown 9.0.1 | Render formatted AI outputs |
-| **AI** | Claude API (Anthropic) | Content generation engine |
+| **AI Providers** | Claude, ChatGPT, Gemini | Multi-provider content generation |
+
+### Supported AI Models
+
+| Provider | Models |
+|----------|--------|
+| **Claude (Anthropic)** | Claude Sonnet 4, Claude Opus 4, Claude 3.5 Sonnet, Claude 3 Opus |
+| **ChatGPT (OpenAI)** | GPT-4o, GPT-4o Mini, GPT-4 Turbo, GPT-4 |
+| **Gemini (Google)** | Gemini 1.5 Pro, Gemini 1.5 Flash, Gemini Pro |
 
 ---
 
