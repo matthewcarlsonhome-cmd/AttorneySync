@@ -92,11 +92,17 @@ const defaultSettings = {
   defaultLocation: ''
 };
 
+// Escape regex special characters
+function escapeRegex(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 // Parse XML output from Claude
 function parseXMLOutput(text, sections) {
   const result = {};
-  sections.forEach(section => {
-    const regex = new RegExp(`<${section.id}>([\\s\\S]*?)<\\/${section.id}>`, 'i');
+  (sections || []).forEach(section => {
+    const escapedId = escapeRegex(section.id);
+    const regex = new RegExp(`<${escapedId}>([\\s\\S]*?)<\\/${escapedId}>`, 'i');
     const match = text.match(regex);
     result[section.id] = match ? match[1].trim() : '';
   });
@@ -121,29 +127,28 @@ function buildUserMessage(workflow, formData) {
   return message;
 }
 
-// Download helpers
-function downloadCSV(content, filename) {
-  const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
+// Download helper - consolidated and with proper cleanup
+function downloadFile(content, filename, mimeType) {
+  const blob = new Blob([content], { type: `${mimeType};charset=utf-8;` });
+  const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
-  link.href = URL.createObjectURL(blob);
+  link.href = url;
   link.download = filename;
   link.click();
+  // Clean up to prevent memory leak
+  setTimeout(() => URL.revokeObjectURL(url), 100);
+}
+
+function downloadCSV(content, filename) {
+  downloadFile(content, filename, 'text/csv');
 }
 
 function downloadText(content, filename) {
-  const blob = new Blob([content], { type: 'text/plain;charset=utf-8;' });
-  const link = document.createElement('a');
-  link.href = URL.createObjectURL(blob);
-  link.download = filename;
-  link.click();
+  downloadFile(content, filename, 'text/plain');
 }
 
 function downloadMarkdown(content, filename) {
-  const blob = new Blob([content], { type: 'text/markdown;charset=utf-8;' });
-  const link = document.createElement('a');
-  link.href = URL.createObjectURL(blob);
-  link.download = filename;
-  link.click();
+  downloadFile(content, filename, 'text/markdown');
 }
 
 // Main App Component
@@ -307,31 +312,39 @@ export default function App() {
         throw new Error(errorData.error?.message || `API Error: ${response.status}`);
       }
 
+      if (!response.body) {
+        throw new Error('Response body is empty');
+      }
+
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
 
-        const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split('\n');
+          const chunk = decoder.decode(value, { stream: true });
+          const lines = chunk.split('\n');
 
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const data = line.slice(6);
-            if (data === '[DONE]') continue;
-            try {
-              const parsed = JSON.parse(data);
-              if (parsed.type === 'content_block_delta' && parsed.delta?.text) {
-                fullContent += parsed.delta.text;
-                onChunk(fullContent);
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const data = line.slice(6);
+              if (data === '[DONE]') continue;
+              try {
+                const parsed = JSON.parse(data);
+                if (parsed.type === 'content_block_delta' && parsed.delta?.text) {
+                  fullContent += parsed.delta.text;
+                  onChunk(fullContent);
+                }
+              } catch (e) {
+                // Ignore parse errors for incomplete chunks
               }
-            } catch (e) {
-              // Ignore parse errors for incomplete chunks
             }
           }
         }
+      } catch (streamError) {
+        throw new Error(`Stream reading failed: ${streamError.message}`);
       }
     }
 
@@ -358,32 +371,40 @@ export default function App() {
         throw new Error(errorData.error?.message || `API Error: ${response.status}`);
       }
 
+      if (!response.body) {
+        throw new Error('Response body is empty');
+      }
+
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
 
-        const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split('\n');
+          const chunk = decoder.decode(value, { stream: true });
+          const lines = chunk.split('\n');
 
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const data = line.slice(6);
-            if (data === '[DONE]') continue;
-            try {
-              const parsed = JSON.parse(data);
-              const content = parsed.choices?.[0]?.delta?.content;
-              if (content) {
-                fullContent += content;
-                onChunk(fullContent);
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const data = line.slice(6);
+              if (data === '[DONE]') continue;
+              try {
+                const parsed = JSON.parse(data);
+                const content = parsed.choices?.[0]?.delta?.content;
+                if (content) {
+                  fullContent += content;
+                  onChunk(fullContent);
+                }
+              } catch (e) {
+                // Ignore parse errors for incomplete chunks
               }
-            } catch (e) {
-              // Ignore parse errors for incomplete chunks
             }
           }
         }
+      } catch (streamError) {
+        throw new Error(`Stream reading failed: ${streamError.message}`);
       }
     }
 
@@ -406,31 +427,39 @@ export default function App() {
         throw new Error(errorData.error?.message || `API Error: ${response.status}`);
       }
 
+      if (!response.body) {
+        throw new Error('Response body is empty');
+      }
+
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
 
-        const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split('\n');
+          const chunk = decoder.decode(value, { stream: true });
+          const lines = chunk.split('\n');
 
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const data = line.slice(6);
-            try {
-              const parsed = JSON.parse(data);
-              const text = parsed.candidates?.[0]?.content?.parts?.[0]?.text;
-              if (text) {
-                fullContent += text;
-                onChunk(fullContent);
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const data = line.slice(6);
+              try {
+                const parsed = JSON.parse(data);
+                const text = parsed.candidates?.[0]?.content?.parts?.[0]?.text;
+                if (text) {
+                  fullContent += text;
+                  onChunk(fullContent);
+                }
+              } catch (e) {
+                // Ignore parse errors for incomplete chunks
               }
-            } catch (e) {
-              // Ignore parse errors for incomplete chunks
             }
           }
         }
+      } catch (streamError) {
+        throw new Error(`Stream reading failed: ${streamError.message}`);
       }
     }
 
@@ -496,7 +525,7 @@ export default function App() {
     const clientName = formData.client_name || 'output';
     let content = `# ${selectedWorkflow.name}\n\nGenerated: ${dateStr}\n\n---\n\n`;
 
-    selectedWorkflow.outputSections.forEach(section => {
+    (selectedWorkflow.outputSections || []).forEach(section => {
       const sectionContent = output[section.id];
       if (sectionContent) {
         content += `## ${section.label}\n\n${sectionContent}\n\n---\n\n`;
@@ -605,7 +634,7 @@ export default function App() {
         success: true,
         message: `Draft created successfully!`,
         postId: result.id,
-        editUrl: result.link?.replace(/\/$/, '') + '?preview=true'
+        editUrl: result.link ? result.link.replace(/\/$/, '') + '?preview=true' : null
       });
     } catch (err) {
       setWpPublishResult({ success: false, message: err.message });
@@ -699,7 +728,7 @@ export default function App() {
                             <div className="flex items-center gap-2 mt-1 text-xs text-slate-500">
                               <span>{formatRelativeTime(artifact.timestamp)}</span>
                               <span>•</span>
-                              <span>{MODEL_PROVIDERS[artifact.provider]?.icon} {artifact.model.split('-').slice(0, 2).join(' ')}</span>
+                              <span>{MODEL_PROVIDERS[artifact.provider]?.icon} {(artifact.model || 'Unknown').split('-').slice(0, 2).join(' ')}</span>
                             </div>
                             {artifact.inputs.client_name && (
                               <p className="text-sm text-slate-600 mt-1 truncate">
@@ -762,7 +791,7 @@ export default function App() {
                   // Download as markdown
                   const dateStr = new Date(selectedArtifact.timestamp).toISOString().split('T')[0];
                   let content = `# ${selectedArtifact.workflowName}\n\nGenerated: ${dateStr}\n\n---\n\n`;
-                  selectedArtifact.outputSections.forEach(section => {
+                  (selectedArtifact.outputSections || []).forEach(section => {
                     const sectionContent = selectedArtifact.outputs[section.id];
                     if (sectionContent) {
                       content += `## ${section.label}\n\n${sectionContent}\n\n---\n\n`;
@@ -807,8 +836,8 @@ export default function App() {
           </div>
 
           {/* Output Sections */}
-          {selectedArtifact.outputSections.map(section => {
-            const content = selectedArtifact.outputs[section.id];
+          {(selectedArtifact.outputSections || []).map(section => {
+            const content = selectedArtifact.outputs?.[section.id];
             if (!content) return null;
 
             return (
@@ -1036,7 +1065,7 @@ export default function App() {
             <div className="flex items-center gap-2">
               {hasApiKey && (
                 <span className="text-xs px-2 py-1 bg-slate-100 rounded text-slate-600">
-                  {currentProvider.icon} {settings.model.split('-').slice(0, 2).join(' ')}
+                  {currentProvider.icon} {(settings.model || 'Unknown').split('-').slice(0, 2).join(' ')}
                 </span>
               )}
               <button onClick={() => setCurrentView('history')} className="p-2 hover:bg-slate-100 rounded-lg relative">
@@ -1123,7 +1152,7 @@ export default function App() {
                                 </span>
                                 <span className="text-slate-300">•</span>
                                 <span className="text-xs text-slate-400">
-                                  {workflow.outputSections.length} outputs
+                                  {(workflow.outputSections || []).length} outputs
                                 </span>
                               </div>
                             </div>
@@ -1204,17 +1233,17 @@ export default function App() {
                   {/* Outputs */}
                   <div className="bg-green-50 rounded-lg p-3">
                     <h4 className="text-xs font-semibold text-green-800 mb-2 flex items-center gap-1">
-                      <FileText className="w-3 h-3" /> Generated Outputs ({selectedWorkflow.outputSections.length})
+                      <FileText className="w-3 h-3" /> Generated Outputs ({(selectedWorkflow.outputSections || []).length})
                     </h4>
                     <ul className="text-xs text-green-700 space-y-1">
-                      {selectedWorkflow.outputSections.slice(0, 5).map(section => (
+                      {(selectedWorkflow.outputSections || []).slice(0, 5).map(section => (
                         <li key={section.id} className="flex items-center gap-1.5">
                           <span className="w-1 h-1 bg-green-500 rounded-full" />
                           {section.label}
                         </li>
                       ))}
-                      {selectedWorkflow.outputSections.length > 5 && (
-                        <li className="text-green-600">+{selectedWorkflow.outputSections.length - 5} more...</li>
+                      {(selectedWorkflow.outputSections || []).length > 5 && (
+                        <li className="text-green-600">+{(selectedWorkflow.outputSections || []).length - 5} more...</li>
                       )}
                     </ul>
                   </div>
@@ -1243,7 +1272,7 @@ export default function App() {
                     </span>
                     {isOverLimit && (
                       <span className="text-xs text-amber-600">
-                        (Large for {settings.model.split('-').slice(0,2).join(' ')})
+                        (Large for {(settings.model || 'Unknown').split('-').slice(0,2).join(' ')})
                       </span>
                     )}
                   </div>
@@ -1319,7 +1348,7 @@ export default function App() {
                         className="input text-sm py-2 bg-white"
                       >
                         <option value="">Select...</option>
-                        {input.options.map(opt => (
+                        {(input.options || []).map(opt => (
                           <option key={opt} value={opt}>{opt}</option>
                         ))}
                       </select>
@@ -1327,7 +1356,7 @@ export default function App() {
 
                     {input.type === 'multiselect' && (
                       <div className="flex flex-wrap gap-1.5">
-                        {input.options.map(opt => {
+                        {(input.options || []).map(opt => {
                           const selected = (formData[input.id] || []).includes(opt);
                           return (
                             <button
@@ -1457,7 +1486,7 @@ export default function App() {
 
                 {!loading && output && (
                   <div className="space-y-4 max-h-[500px] overflow-y-auto">
-                    {selectedWorkflow.outputSections.map(section => {
+                    {(selectedWorkflow.outputSections || []).map(section => {
                       const content = output[section.id];
                       if (!content) return null;
                       return (
