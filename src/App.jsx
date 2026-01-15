@@ -299,6 +299,7 @@ export default function App() {
   const [currentConfigWorkflow, setCurrentConfigWorkflow] = useState(0); // Index of workflow being configured
   const [streamingContent, setStreamingContent] = useState(''); // Current streaming content during campaign execution
   const [currentStreamingWorkflow, setCurrentStreamingWorkflow] = useState(null); // Name of workflow currently streaming
+  const [selectedPromptsForExport, setSelectedPromptsForExport] = useState([]); // Selected workflow IDs for prompt export
 
   // Load settings from localStorage on mount
   useEffect(() => {
@@ -714,6 +715,70 @@ export default function App() {
     setCampaignInputs({});
     setCurrentConfigWorkflow(0);
     setCampaignClientProfile(null);
+  };
+
+  // Export system prompts as CSV
+  const exportSystemPromptsAsCSV = () => {
+    if (selectedPromptsForExport.length === 0) return;
+
+    const selectedWorkflows = workflows.filter(w => selectedPromptsForExport.includes(w.id));
+    const dateStr = new Date().toISOString().split('T')[0];
+
+    // CSV header
+    let csvContent = 'Workflow ID,Workflow Name,Category,Description,Input Fields,System Prompt\n';
+
+    selectedWorkflows.forEach(workflow => {
+      // Escape fields for CSV (handle commas, quotes, newlines)
+      const escapeCSV = (str) => {
+        if (!str) return '';
+        const escaped = str.replace(/"/g, '""');
+        return `"${escaped}"`;
+      };
+
+      // Format input fields as readable list
+      const inputFields = workflow.inputs
+        .map(input => `${input.label}${input.required ? ' (required)' : ''}: ${input.type}`)
+        .join('\\n');
+
+      csvContent += [
+        escapeCSV(workflow.id),
+        escapeCSV(workflow.name),
+        escapeCSV(categories[workflow.category]?.name || workflow.category),
+        escapeCSV(workflow.description),
+        escapeCSV(inputFields),
+        escapeCSV(workflow.systemPrompt)
+      ].join(',') + '\n';
+    });
+
+    // Download the CSV
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `attorney-sync-system-prompts-${dateStr}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  // Toggle prompt selection for export
+  const togglePromptSelection = (workflowId) => {
+    setSelectedPromptsForExport(prev =>
+      prev.includes(workflowId)
+        ? prev.filter(id => id !== workflowId)
+        : [...prev, workflowId]
+    );
+  };
+
+  // Select all prompts for export
+  const selectAllPrompts = () => {
+    setSelectedPromptsForExport(workflows.map(w => w.id));
+  };
+
+  // Deselect all prompts
+  const deselectAllPrompts = () => {
+    setSelectedPromptsForExport([]);
   };
 
   // Initialize campaign inputs for selected workflows
@@ -2427,6 +2492,101 @@ export default function App() {
                 placeholder="Default Location (e.g., Phoenix, Arizona)"
                 className="w-full px-4 py-3 bg-white border border-slate-200/60 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-300"
               />
+            </div>
+          </div>
+
+          {/* System Prompts Export Tool */}
+          <div className="bg-white rounded-2xl border border-slate-200/60 overflow-hidden shadow-sm">
+            <div className="px-5 py-4 bg-gradient-to-r from-amber-50 to-orange-50 border-b border-slate-100 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center">
+                  <FileText className="w-4 h-4 text-white" />
+                </div>
+                <div>
+                  <span className="font-semibold text-slate-900">System Prompts Export</span>
+                  <p className="text-xs text-slate-500">Download workflow prompts for review</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={selectAllPrompts}
+                  className="px-3 py-1.5 text-xs font-medium text-amber-700 bg-amber-100 rounded-lg hover:bg-amber-200 transition-colors"
+                >
+                  Select All
+                </button>
+                <button
+                  onClick={deselectAllPrompts}
+                  className="px-3 py-1.5 text-xs font-medium text-slate-600 bg-slate-100 rounded-lg hover:bg-slate-200 transition-colors"
+                >
+                  Clear
+                </button>
+              </div>
+            </div>
+            <div className="p-5">
+              <div className="max-h-64 overflow-y-auto space-y-2 mb-4">
+                {Object.entries(categories).map(([categoryId, category]) => {
+                  const categoryWorkflows = workflows.filter(w => w.category === categoryId);
+                  if (categoryWorkflows.length === 0) return null;
+
+                  const allSelected = categoryWorkflows.every(w => selectedPromptsForExport.includes(w.id));
+                  const someSelected = categoryWorkflows.some(w => selectedPromptsForExport.includes(w.id));
+
+                  return (
+                    <div key={categoryId} className="border border-slate-200 rounded-xl overflow-hidden">
+                      <button
+                        onClick={() => {
+                          if (allSelected) {
+                            setSelectedPromptsForExport(prev => prev.filter(id => !categoryWorkflows.map(w => w.id).includes(id)));
+                          } else {
+                            setSelectedPromptsForExport(prev => [...new Set([...prev, ...categoryWorkflows.map(w => w.id)])]);
+                          }
+                        }}
+                        className="w-full px-4 py-2.5 bg-slate-50 hover:bg-slate-100 flex items-center justify-between text-left transition-colors"
+                      >
+                        <div className="flex items-center gap-2">
+                          <div className={`w-4 h-4 rounded border-2 flex items-center justify-center ${allSelected ? 'bg-amber-500 border-amber-500' : someSelected ? 'bg-amber-200 border-amber-400' : 'border-slate-300'}`}>
+                            {allSelected && <Check className="w-3 h-3 text-white" />}
+                            {someSelected && !allSelected && <div className="w-2 h-2 bg-amber-500 rounded-sm" />}
+                          </div>
+                          <span className="font-medium text-slate-700 text-sm">{category.name}</span>
+                        </div>
+                        <span className="text-xs text-slate-400">{categoryWorkflows.length} workflows</span>
+                      </button>
+                      <div className="px-4 py-2 space-y-1 bg-white">
+                        {categoryWorkflows.map(workflow => (
+                          <label
+                            key={workflow.id}
+                            className="flex items-center gap-3 py-1.5 px-2 rounded-lg hover:bg-slate-50 cursor-pointer transition-colors"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={selectedPromptsForExport.includes(workflow.id)}
+                              onChange={() => togglePromptSelection(workflow.id)}
+                              className="w-4 h-4 rounded border-slate-300 text-amber-500 focus:ring-amber-500"
+                            />
+                            <span className="text-sm text-slate-600 flex-1">{workflow.name}</span>
+                            <span className="text-xs text-slate-400">{workflow.inputs.length} inputs</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="flex items-center justify-between pt-4 border-t border-slate-200">
+                <div className="text-sm text-slate-600">
+                  <span className="font-semibold text-amber-600">{selectedPromptsForExport.length}</span> of {workflows.length} workflows selected
+                </div>
+                <button
+                  onClick={exportSystemPromptsAsCSV}
+                  disabled={selectedPromptsForExport.length === 0}
+                  className="px-4 py-2 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-xl hover:from-amber-600 hover:to-orange-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 text-sm font-semibold shadow-lg shadow-amber-200/50 transition-all hover:shadow-xl"
+                >
+                  <Download className="w-4 h-4" />
+                  Download CSV
+                </button>
+              </div>
             </div>
           </div>
 
