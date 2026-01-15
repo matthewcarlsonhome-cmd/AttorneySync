@@ -106,46 +106,46 @@ const CAMPAIGN_PRESETS = [
   {
     id: 'full-content',
     name: 'Full Content Campaign',
-    description: 'Strategy brief, blog article, social posts, and email newsletter',
+    description: 'Content brief, blog article, LinkedIn posts, and email campaign',
     icon: 'Package',
     color: '#6366f1',
-    workflowIds: ['content-strategy-brief', 'seo-blog-article', 'linkedin-content', 'email-newsletter'],
+    workflowIds: ['content-brief-generator', 'article-generator', 'linkedin-content-engine', 'email-marketing-campaign'],
     estimatedTime: '8-12 min'
   },
   {
     id: 'advertising-blitz',
     name: 'Advertising Campaign',
-    description: 'Landing page, Google Ads, and social ads',
+    description: 'Google Ads and Facebook/Instagram social ads',
     icon: 'Target',
     color: '#f59e0b',
-    workflowIds: ['ppc-landing-page', 'google-ads', 'facebook-instagram-ads'],
+    workflowIds: ['google-ads-campaign-builder', 'facebook-instagram-ads'],
     estimatedTime: '6-10 min'
   },
   {
     id: 'social-media',
     name: 'Social Media Bundle',
-    description: 'LinkedIn content and social media ads',
+    description: 'LinkedIn content and Facebook/Instagram ads',
     icon: 'Share2',
     color: '#0ea5e9',
-    workflowIds: ['linkedin-content', 'facebook-instagram-ads'],
+    workflowIds: ['linkedin-content-engine', 'facebook-instagram-ads'],
     estimatedTime: '4-6 min'
   },
   {
     id: 'seo-focused',
     name: 'SEO Content Package',
-    description: 'Blog article, website copy, and Google Business Profile',
+    description: 'Blog article, website audit, and Google Business Profile',
     icon: 'Search',
     color: '#10b981',
-    workflowIds: ['seo-blog-article', 'website-copy', 'google-business-profile'],
+    workflowIds: ['article-generator', 'website-audit', 'google-business-profile'],
     estimatedTime: '6-8 min'
   },
   {
     id: 'client-success',
     name: 'Client Success Story',
-    description: 'Case study, testimonial, and promotional content',
+    description: 'Case study, review management, and LinkedIn promotion',
     icon: 'Star',
     color: '#8b5cf6',
-    workflowIds: ['case-study-generator', 'client-testimonial', 'linkedin-content'],
+    workflowIds: ['case-study-generator', 'review-management', 'linkedin-content-engine'],
     estimatedTime: '5-8 min'
   }
 ];
@@ -1341,35 +1341,57 @@ export default function App() {
           {/* Campaign Setup (show when not running and no results) */}
           {!isRunning && campaignResults.length === 0 && (
             <>
-              {/* Client Profile Selection */}
+              {/* Law Firm Selection */}
               <div className="bg-white rounded-xl border border-slate-200 p-4 mb-4">
                 <h3 className="font-semibold text-slate-900 mb-3 flex items-center gap-2">
-                  <Database className="w-4 h-4 text-slate-500" />
-                  Client Profile
+                  <Database className="w-4 h-4 text-indigo-600" />
+                  Select Law Firm
+                  <span className="text-xs text-slate-400 font-normal">(Required)</span>
                 </h3>
                 {clientProfiles.length === 0 ? (
-                  <div className="text-sm text-slate-500">
-                    No client profiles saved yet.{' '}
-                    <button onClick={() => setCurrentView('settings')} className="text-blue-600 hover:underline">
-                      Create one in Settings
+                  <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-center">
+                    <Database className="w-8 h-8 mx-auto mb-2 text-amber-400" />
+                    <p className="text-sm text-amber-800 font-medium">No law firm profiles yet</p>
+                    <p className="text-xs text-amber-600 mt-1">Add a law firm profile to auto-fill all workflows in your campaign</p>
+                    <button
+                      onClick={() => setCurrentView('settings')}
+                      className="mt-3 px-4 py-2 bg-amber-600 text-white rounded-lg text-sm hover:bg-amber-700"
+                    >
+                      Go to Settings to Add Law Firm
                     </button>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
-                    {clientProfiles.map(profile => (
-                      <button
-                        key={profile.id}
-                        onClick={() => setCampaignClientProfile(profile)}
-                        className={`p-3 rounded-lg border-2 text-left transition-all ${
-                          campaignClientProfile?.id === profile.id
-                            ? 'border-indigo-500 bg-indigo-50'
-                            : 'border-slate-200 hover:border-slate-300'
-                        }`}
-                      >
-                        <div className="font-medium text-slate-900 truncate">{profile.name}</div>
-                        <div className="text-xs text-slate-500 truncate">{profile.location || 'No location'}</div>
-                      </button>
-                    ))}
+                  <div className="space-y-3">
+                    <select
+                      value={campaignClientProfile?.id || ''}
+                      onChange={(e) => {
+                        const profile = clientProfiles.find(p => p.id === e.target.value);
+                        setCampaignClientProfile(profile || null);
+                      }}
+                      className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-white cursor-pointer"
+                    >
+                      <option value="">-- Select a Law Firm --</option>
+                      {clientProfiles.map(profile => (
+                        <option key={profile.id} value={profile.id}>
+                          {profile.name} {profile.location ? `(${profile.location})` : ''}
+                        </option>
+                      ))}
+                    </select>
+                    {campaignClientProfile && (
+                      <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-3">
+                        <div className="flex items-center gap-2 mb-2">
+                          <CheckCircle className="w-4 h-4 text-indigo-600" />
+                          <span className="font-medium text-indigo-900">{campaignClientProfile.name}</span>
+                        </div>
+                        <div className="text-xs text-indigo-700 space-y-1">
+                          {campaignClientProfile.location && <div>Location: {campaignClientProfile.location}</div>}
+                          {campaignClientProfile.practiceAreas?.length > 0 && (
+                            <div>Practice Areas: {campaignClientProfile.practiceAreas.join(', ')}</div>
+                          )}
+                          {campaignClientProfile.website && <div>Website: {campaignClientProfile.website}</div>}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -1897,25 +1919,77 @@ export default function App() {
             </div>
           </div>
 
-          {/* Default Values */}
+          {/* Law Firm Profiles */}
           <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-            <div className="px-4 py-3 bg-purple-50 border-b border-slate-100 flex items-center gap-2">
-              <Database className="w-4 h-4 text-purple-600" />
-              <span className="font-medium text-slate-900 text-sm">Default Values</span>
+            <div className="px-4 py-3 bg-purple-50 border-b border-slate-100 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Database className="w-4 h-4 text-purple-600" />
+                <span className="font-medium text-slate-900 text-sm">Law Firm Profiles</span>
+                <span className="text-xs text-slate-500">({clientProfiles.length} saved)</span>
+              </div>
+              <button
+                onClick={() => {
+                  setNewClientProfile({ name: '', practiceAreas: [], location: '', tone: 'professional', competitors: '', website: '', uniqueValue: '' });
+                  setShowClientProfileModal(true);
+                }}
+                className="text-xs px-2 py-1 bg-purple-600 text-white rounded hover:bg-purple-700 flex items-center gap-1"
+              >
+                <span>+ Add Firm</span>
+              </button>
+            </div>
+            <div className="p-4">
+              {clientProfiles.length === 0 ? (
+                <div className="text-center py-6 text-slate-500">
+                  <Database className="w-8 h-8 mx-auto mb-2 text-slate-300" />
+                  <p className="text-sm">No law firm profiles yet</p>
+                  <p className="text-xs text-slate-400 mt-1">Add profiles to auto-fill workflows and campaigns</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {clientProfiles.map(profile => (
+                    <div
+                      key={profile.id}
+                      className="flex items-center justify-between p-3 bg-slate-50 rounded-lg border border-slate-200"
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="font-medium text-slate-900">{profile.name}</div>
+                        <div className="text-xs text-slate-500 truncate">
+                          {profile.location || 'No location'} • {profile.practiceAreas?.length || 0} practice areas
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => deleteClientProfile(profile.id)}
+                        className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Quick Default (Legacy Support) */}
+          <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+            <div className="px-4 py-3 bg-slate-50 border-b border-slate-100 flex items-center gap-2">
+              <Settings className="w-4 h-4 text-slate-500" />
+              <span className="font-medium text-slate-900 text-sm">Quick Defaults</span>
+              <span className="text-xs text-slate-400">(Used when no profile selected)</span>
             </div>
             <div className="p-4 space-y-3">
               <input
                 type="text"
                 value={settings.defaultClientName}
                 onChange={(e) => setSettings({ ...settings, defaultClientName: e.target.value })}
-                placeholder="Default Client Name"
+                placeholder="Default Firm Name"
                 className="input text-sm"
               />
               <input
                 type="text"
                 value={settings.defaultLocation}
                 onChange={(e) => setSettings({ ...settings, defaultLocation: e.target.value })}
-                placeholder="Default Location"
+                placeholder="Default Location (e.g., Phoenix, Arizona)"
                 className="input text-sm"
               />
             </div>
@@ -1990,22 +2064,25 @@ export default function App() {
             </div>
           )}
 
-          {/* Compact Hero */}
-          <div className="bg-gradient-to-r from-blue-600 to-indigo-700 rounded-xl p-4 mb-4 text-white">
-            <div className="flex items-center justify-between">
+          {/* Hero with Campaign Builder CTA */}
+          <div className="bg-gradient-to-r from-blue-600 to-indigo-700 rounded-xl p-5 mb-4 text-white">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
               <div>
-                <h2 className="text-lg font-bold">AI-Powered Legal Marketing</h2>
-                <p className="text-blue-100 text-sm">{totalWorkflows} workflows for content, ads & operations</p>
+                <h2 className="text-xl font-bold">AI-Powered Legal Marketing</h2>
+                <p className="text-blue-100 text-sm mt-1">{totalWorkflows} workflows for content, ads & operations</p>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
                 <button
                   onClick={() => setCurrentView('campaign')}
                   disabled={!hasApiKey}
-                  className="flex items-center gap-2 px-4 py-2 bg-white text-indigo-700 rounded-lg hover:bg-blue-50 disabled:opacity-50 disabled:cursor-not-allowed font-semibold text-sm transition-colors"
+                  className="flex items-center gap-2 px-5 py-3 bg-white text-indigo-700 rounded-xl hover:bg-blue-50 disabled:opacity-50 disabled:cursor-not-allowed font-bold text-sm transition-colors shadow-lg"
                 >
-                  <Package className="w-4 h-4" />
+                  <Package className="w-5 h-5" />
                   Campaign Builder
                 </button>
+                <div className="text-xs text-blue-200 max-w-[200px]">
+                  Chain multiple workflows together and run them all at once for a complete campaign
+                </div>
               </div>
             </div>
           </div>
