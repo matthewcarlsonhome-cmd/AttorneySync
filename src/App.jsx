@@ -17,16 +17,16 @@ const iconMap = {
   CheckSquare, Linkedin
 };
 
-// Model providers and their available models
+// Model providers and their available models with token limits
 const MODEL_PROVIDERS = {
   anthropic: {
     name: 'Claude (Anthropic)',
     icon: '🟠',
     models: [
-      { id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4', description: 'Fast & capable' },
-      { id: 'claude-opus-4-20250514', name: 'Claude Opus 4', description: 'Most powerful' },
-      { id: 'claude-3-5-sonnet-20241022', name: 'Claude 3.5 Sonnet', description: 'Previous gen' },
-      { id: 'claude-3-opus-20240229', name: 'Claude 3 Opus', description: 'Previous gen' }
+      { id: 'claude-sonnet-4-20250514', name: 'Claude Sonnet 4', description: 'Fast & capable', contextLimit: 200000, maxOutput: 8192 },
+      { id: 'claude-opus-4-20250514', name: 'Claude Opus 4', description: 'Most powerful', contextLimit: 200000, maxOutput: 8192 },
+      { id: 'claude-3-5-sonnet-20241022', name: 'Claude 3.5 Sonnet', description: 'Previous gen', contextLimit: 200000, maxOutput: 8192 },
+      { id: 'claude-3-opus-20240229', name: 'Claude 3 Opus', description: 'Previous gen', contextLimit: 200000, maxOutput: 4096 }
     ],
     apiKeyPlaceholder: 'sk-ant-api03-...',
     apiKeyHelp: 'console.anthropic.com'
@@ -35,10 +35,10 @@ const MODEL_PROVIDERS = {
     name: 'ChatGPT (OpenAI)',
     icon: '🟢',
     models: [
-      { id: 'gpt-4o', name: 'GPT-4o', description: 'Latest multimodal' },
-      { id: 'gpt-4o-mini', name: 'GPT-4o Mini', description: 'Fast & affordable' },
-      { id: 'gpt-4-turbo', name: 'GPT-4 Turbo', description: 'High capability' },
-      { id: 'gpt-4', name: 'GPT-4', description: 'Original GPT-4' }
+      { id: 'gpt-4o', name: 'GPT-4o', description: 'Latest multimodal', contextLimit: 128000, maxOutput: 16384 },
+      { id: 'gpt-4o-mini', name: 'GPT-4o Mini', description: 'Fast & affordable', contextLimit: 128000, maxOutput: 16384 },
+      { id: 'gpt-4-turbo', name: 'GPT-4 Turbo', description: 'High capability', contextLimit: 128000, maxOutput: 4096 },
+      { id: 'gpt-4', name: 'GPT-4', description: 'Original GPT-4', contextLimit: 8192, maxOutput: 4096 }
     ],
     apiKeyPlaceholder: 'sk-...',
     apiKeyHelp: 'platform.openai.com'
@@ -47,14 +47,28 @@ const MODEL_PROVIDERS = {
     name: 'Gemini (Google)',
     icon: '🔵',
     models: [
-      { id: 'gemini-1.5-pro', name: 'Gemini 1.5 Pro', description: 'Most capable' },
-      { id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash', description: 'Fast & efficient' },
-      { id: 'gemini-pro', name: 'Gemini Pro', description: 'Balanced' }
+      { id: 'gemini-1.5-pro', name: 'Gemini 1.5 Pro', description: 'Most capable', contextLimit: 2000000, maxOutput: 8192 },
+      { id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash', description: 'Fast & efficient', contextLimit: 1000000, maxOutput: 8192 },
+      { id: 'gemini-pro', name: 'Gemini Pro', description: 'Balanced', contextLimit: 32000, maxOutput: 2048 }
     ],
     apiKeyPlaceholder: 'AIza...',
     apiKeyHelp: 'aistudio.google.com'
   }
 };
+
+// Get current model config
+function getModelConfig(provider, modelId) {
+  const providerConfig = MODEL_PROVIDERS[provider];
+  if (!providerConfig) return { contextLimit: 8192, maxOutput: 4096 };
+  const model = providerConfig.models.find(m => m.id === modelId);
+  return model || { contextLimit: 8192, maxOutput: 4096 };
+}
+
+// Estimate token count (rough: ~4 chars per token for English)
+function estimateTokens(text) {
+  if (!text) return 0;
+  return Math.ceil(text.length / 4);
+}
 
 // Local storage keys
 const STORAGE_KEYS = {
@@ -209,6 +223,14 @@ export default function App() {
   // API call based on provider
   const callAPI = async (systemPrompt, userMessage) => {
     const apiKey = getCurrentApiKey();
+    const modelConfig = getModelConfig(settings.provider, settings.model);
+    const maxTokens = modelConfig.maxOutput;
+
+    // Check if prompt might be too large for the model
+    const totalInputTokens = estimateTokens(systemPrompt) + estimateTokens(userMessage);
+    if (totalInputTokens > modelConfig.contextLimit * 0.8) {
+      throw new Error(`Input too large for ${settings.model}. Estimated ${totalInputTokens.toLocaleString()} tokens, limit is ${modelConfig.contextLimit.toLocaleString()}. Try a model with higher context limit.`);
+    }
 
     if (settings.provider === 'anthropic') {
       const response = await fetch('https://api.anthropic.com/v1/messages', {
@@ -221,7 +243,7 @@ export default function App() {
         },
         body: JSON.stringify({
           model: settings.model,
-          max_tokens: 8192,
+          max_tokens: maxTokens,
           system: systemPrompt,
           messages: [{ role: 'user', content: userMessage }]
         })
@@ -243,7 +265,7 @@ export default function App() {
         },
         body: JSON.stringify({
           model: settings.model,
-          max_tokens: 8192,
+          max_tokens: maxTokens,
           messages: [
             { role: 'system', content: systemPrompt },
             { role: 'user', content: userMessage }
@@ -264,7 +286,7 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           contents: [{ parts: [{ text: `${systemPrompt}\n\n${userMessage}` }] }],
-          generationConfig: { maxOutputTokens: 8192 }
+          generationConfig: { maxOutputTokens: maxTokens }
         })
       });
       if (!response.ok) {
@@ -496,10 +518,28 @@ export default function App() {
                 >
                   {currentProvider.models.map(model => (
                     <option key={model.id} value={model.id}>
-                      {model.name} - {model.description}
+                      {model.name} - {model.description} ({(model.contextLimit / 1000).toFixed(0)}K context)
                     </option>
                   ))}
                 </select>
+                {(() => {
+                  const currentModel = currentProvider.models.find(m => m.id === settings.model);
+                  if (currentModel) {
+                    return (
+                      <div className="mt-2 p-2 bg-slate-50 rounded-lg text-xs text-slate-600">
+                        <div className="flex justify-between">
+                          <span>Context Window:</span>
+                          <span className="font-medium">{currentModel.contextLimit.toLocaleString()} tokens</span>
+                        </div>
+                        <div className="flex justify-between mt-1">
+                          <span>Max Output:</span>
+                          <span className="font-medium">{currentModel.maxOutput.toLocaleString()} tokens</span>
+                        </div>
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
               </div>
 
               <div>
@@ -792,38 +832,57 @@ export default function App() {
           </div>
 
           {/* System Prompt Section */}
-          <div className="bg-white rounded-lg border border-slate-200 mb-4 overflow-hidden">
-            <button
-              onClick={() => setShowSystemPrompt(!showSystemPrompt)}
-              className="w-full px-4 py-2.5 flex items-center justify-between hover:bg-slate-50 transition-colors"
-            >
-              <div className="flex items-center gap-2">
-                <Code className="w-4 h-4 text-slate-500" />
-                <span className="text-sm font-medium text-slate-700">System Prompt</span>
-              </div>
-              <div className="flex items-center gap-2">
+          {(() => {
+            const modelConfig = getModelConfig(settings.provider, settings.model);
+            const promptTokens = estimateTokens(selectedWorkflow.systemPrompt);
+            const isOverLimit = promptTokens > modelConfig.contextLimit * 0.5;
+
+            return (
+              <div className="bg-white rounded-lg border border-slate-200 mb-4 overflow-hidden">
                 <button
-                  onClick={(e) => { e.stopPropagation(); copyToClipboard(selectedWorkflow.systemPrompt, 'system-prompt'); }}
-                  className="p-1.5 hover:bg-slate-200 rounded transition-colors"
-                  title="Copy system prompt"
+                  onClick={() => setShowSystemPrompt(!showSystemPrompt)}
+                  className="w-full px-4 py-2.5 flex items-center justify-between hover:bg-slate-50 transition-colors"
                 >
-                  {copiedId === 'system-prompt' ? (
-                    <Check className="w-3.5 h-3.5 text-green-500" />
-                  ) : (
-                    <Copy className="w-3.5 h-3.5 text-slate-400" />
-                  )}
+                  <div className="flex items-center gap-2">
+                    <Code className="w-4 h-4 text-slate-500" />
+                    <span className="text-sm font-medium text-slate-700">System Prompt</span>
+                    <span className={`text-xs px-1.5 py-0.5 rounded ${isOverLimit ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-600'}`}>
+                      ~{promptTokens.toLocaleString()} tokens
+                    </span>
+                    {isOverLimit && (
+                      <span className="text-xs text-amber-600">
+                        (Large for {settings.model.split('-').slice(0,2).join(' ')})
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={(e) => { e.stopPropagation(); copyToClipboard(selectedWorkflow.systemPrompt, 'system-prompt'); }}
+                      className="p-1.5 hover:bg-slate-200 rounded transition-colors"
+                      title="Copy system prompt"
+                    >
+                      {copiedId === 'system-prompt' ? (
+                        <Check className="w-3.5 h-3.5 text-green-500" />
+                      ) : (
+                        <Copy className="w-3.5 h-3.5 text-slate-400" />
+                      )}
+                    </button>
+                    {showSystemPrompt ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
+                  </div>
                 </button>
-                {showSystemPrompt ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
+                {showSystemPrompt && (
+                  <div className="px-4 pb-4">
+                    <div className="mb-2 flex items-center justify-between text-xs text-slate-500">
+                      <span>Model: {settings.model} (Context: {modelConfig.contextLimit.toLocaleString()}, Output: {modelConfig.maxOutput.toLocaleString()})</span>
+                    </div>
+                    <pre className="bg-slate-900 text-slate-100 p-3 rounded-lg text-xs font-mono whitespace-pre-wrap overflow-x-auto max-h-64">
+                      {selectedWorkflow.systemPrompt}
+                    </pre>
+                  </div>
+                )}
               </div>
-            </button>
-            {showSystemPrompt && (
-              <div className="px-4 pb-4">
-                <pre className="bg-slate-900 text-slate-100 p-3 rounded-lg text-xs font-mono whitespace-pre-wrap overflow-x-auto max-h-64">
-                  {selectedWorkflow.systemPrompt}
-                </pre>
-              </div>
-            )}
-          </div>
+            );
+          })()}
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {/* Input Form */}
