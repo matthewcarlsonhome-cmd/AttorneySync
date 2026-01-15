@@ -161,6 +161,8 @@ export default function App() {
   const [publishingToWP, setPublishingToWP] = useState(false);
   const [wpPublishResult, setWpPublishResult] = useState(null);
   const [showSystemPrompt, setShowSystemPrompt] = useState(false);
+  const [artifacts, setArtifacts] = useState([]);
+  const [selectedArtifact, setSelectedArtifact] = useState(null);
 
   // Load settings from localStorage on mount
   useEffect(() => {
@@ -181,7 +183,55 @@ export default function App() {
         console.error('Failed to load settings:', e);
       }
     }
+    // Load artifacts history
+    const savedArtifacts = localStorage.getItem(STORAGE_KEYS.HISTORY);
+    if (savedArtifacts) {
+      try {
+        setArtifacts(JSON.parse(savedArtifacts));
+      } catch (e) {
+        console.error('Failed to load artifacts:', e);
+      }
+    }
   }, []);
+
+  // Save artifact to history
+  const saveArtifact = (workflow, inputs, outputs, rawContent) => {
+    const artifact = {
+      id: Date.now().toString(),
+      timestamp: new Date().toISOString(),
+      workflowId: workflow.id,
+      workflowName: workflow.name,
+      workflowCategory: workflow.category,
+      provider: settings.provider,
+      model: settings.model,
+      inputs: { ...inputs },
+      outputs: { ...outputs },
+      rawContent,
+      outputSections: workflow.outputSections
+    };
+
+    const updated = [artifact, ...artifacts].slice(0, 50); // Keep last 50
+    setArtifacts(updated);
+    localStorage.setItem(STORAGE_KEYS.HISTORY, JSON.stringify(updated));
+    return artifact;
+  };
+
+  // Delete artifact
+  const deleteArtifact = (artifactId) => {
+    const updated = artifacts.filter(a => a.id !== artifactId);
+    setArtifacts(updated);
+    localStorage.setItem(STORAGE_KEYS.HISTORY, JSON.stringify(updated));
+    if (selectedArtifact?.id === artifactId) {
+      setSelectedArtifact(null);
+    }
+  };
+
+  // Clear all artifacts
+  const clearAllArtifacts = () => {
+    setArtifacts([]);
+    localStorage.removeItem(STORAGE_KEYS.HISTORY);
+    setSelectedArtifact(null);
+  };
 
   // Save settings to localStorage
   const saveSettings = () => {
@@ -421,6 +471,9 @@ export default function App() {
       setRawOutput(content);
       const parsed = parseXMLOutput(content, selectedWorkflow.outputSections);
       setOutput(parsed);
+
+      // Auto-save artifact
+      saveArtifact(selectedWorkflow, formData, parsed, content);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -559,6 +612,235 @@ export default function App() {
     } finally {
       setPublishingToWP(false);
     }
+  };
+
+  // Format relative time
+  const formatRelativeTime = (isoString) => {
+    const date = new Date(isoString);
+    const now = new Date();
+    const diffMs = now - date;
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+
+    if (diffMins < 1) return 'Just now';
+    if (diffMins < 60) return `${diffMins}m ago`;
+    if (diffHours < 24) return `${diffHours}h ago`;
+    if (diffDays < 7) return `${diffDays}d ago`;
+    return date.toLocaleDateString();
+  };
+
+  // View artifact in detail
+  const viewArtifact = (artifact) => {
+    setSelectedArtifact(artifact);
+    setCurrentView('artifact');
+  };
+
+  // Render History Page
+  const renderHistory = () => {
+    return (
+      <div className="min-h-screen bg-slate-50">
+        <header className="bg-white border-b border-slate-200 sticky top-0 z-50">
+          <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <button onClick={() => setCurrentView('dashboard')} className="p-2 hover:bg-slate-100 rounded-lg">
+                <ArrowLeft className="w-5 h-5 text-slate-500" />
+              </button>
+              <Clock className="w-5 h-5 text-slate-600" />
+              <h1 className="font-semibold text-slate-900">Generation History</h1>
+              <span className="text-sm text-slate-500">({artifacts.length} saved)</span>
+            </div>
+            {artifacts.length > 0 && (
+              <button
+                onClick={() => {
+                  if (confirm('Clear all saved generations? This cannot be undone.')) {
+                    clearAllArtifacts();
+                  }
+                }}
+                className="text-sm text-red-600 hover:text-red-700 px-3 py-1.5 hover:bg-red-50 rounded-lg"
+              >
+                Clear All
+              </button>
+            )}
+          </div>
+        </header>
+
+        <main className="max-w-4xl mx-auto px-4 py-6">
+          {artifacts.length === 0 ? (
+            <div className="text-center py-12">
+              <Clock className="w-12 h-12 text-slate-300 mx-auto mb-4" />
+              <h3 className="text-lg font-medium text-slate-900 mb-2">No saved generations yet</h3>
+              <p className="text-slate-500 mb-4">Run a workflow to generate content. Results are automatically saved here.</p>
+              <button
+                onClick={() => setCurrentView('dashboard')}
+                className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+              >
+                <Sparkles className="w-4 h-4" />
+                Browse Workflows
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {artifacts.map(artifact => {
+                const Icon = iconMap[categories[artifact.workflowCategory]?.icon] || FileText;
+                return (
+                  <div
+                    key={artifact.id}
+                    className="bg-white rounded-lg border border-slate-200 hover:border-blue-300 hover:shadow-sm transition-all"
+                  >
+                    <div className="p-4">
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex items-start gap-3 flex-1 min-w-0">
+                          <div className="p-2 bg-slate-100 rounded-lg flex-shrink-0">
+                            <Icon className="w-4 h-4 text-slate-600" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <h3 className="font-medium text-slate-900 truncate">{artifact.workflowName}</h3>
+                            <div className="flex items-center gap-2 mt-1 text-xs text-slate-500">
+                              <span>{formatRelativeTime(artifact.timestamp)}</span>
+                              <span>•</span>
+                              <span>{MODEL_PROVIDERS[artifact.provider]?.icon} {artifact.model.split('-').slice(0, 2).join(' ')}</span>
+                            </div>
+                            {artifact.inputs.client_name && (
+                              <p className="text-sm text-slate-600 mt-1 truncate">
+                                Client: {artifact.inputs.client_name}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                          <button
+                            onClick={() => viewArtifact(artifact)}
+                            className="px-3 py-1.5 text-sm bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100"
+                          >
+                            View
+                          </button>
+                          <button
+                            onClick={() => deleteArtifact(artifact.id)}
+                            className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </main>
+      </div>
+    );
+  };
+
+  // Render Artifact Detail Page
+  const renderArtifactDetail = () => {
+    if (!selectedArtifact) return null;
+
+    const Icon = iconMap[categories[selectedArtifact.workflowCategory]?.icon] || FileText;
+
+    return (
+      <div className="min-h-screen bg-slate-50">
+        <header className="bg-white border-b border-slate-200 sticky top-0 z-50">
+          <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <button onClick={() => setCurrentView('history')} className="p-2 hover:bg-slate-100 rounded-lg">
+                <ArrowLeft className="w-5 h-5 text-slate-500" />
+              </button>
+              <Icon className="w-5 h-5 text-slate-600" />
+              <div>
+                <h1 className="font-semibold text-slate-900">{selectedArtifact.workflowName}</h1>
+                <p className="text-xs text-slate-500">
+                  {new Date(selectedArtifact.timestamp).toLocaleString()} • {MODEL_PROVIDERS[selectedArtifact.provider]?.icon} {selectedArtifact.model}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => {
+                  // Download as markdown
+                  const dateStr = new Date(selectedArtifact.timestamp).toISOString().split('T')[0];
+                  let content = `# ${selectedArtifact.workflowName}\n\nGenerated: ${dateStr}\n\n---\n\n`;
+                  selectedArtifact.outputSections.forEach(section => {
+                    const sectionContent = selectedArtifact.outputs[section.id];
+                    if (sectionContent) {
+                      content += `## ${section.label}\n\n${sectionContent}\n\n---\n\n`;
+                    }
+                  });
+                  downloadMarkdown(content, `${selectedArtifact.workflowName.toLowerCase().replace(/\s+/g, '-')}-${dateStr}.md`);
+                }}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200"
+              >
+                <Download className="w-4 h-4" />
+                Export
+              </button>
+              <button
+                onClick={() => deleteArtifact(selectedArtifact.id)}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 rounded-lg"
+              >
+                <X className="w-4 h-4" />
+                Delete
+              </button>
+            </div>
+          </div>
+        </header>
+
+        <main className="max-w-4xl mx-auto px-4 py-6 space-y-4">
+          {/* Inputs Summary */}
+          <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
+            <div className="px-4 py-2 bg-slate-50 border-b border-slate-200">
+              <h3 className="font-medium text-slate-700 text-sm">Inputs</h3>
+            </div>
+            <div className="p-4 text-sm">
+              <div className="grid grid-cols-2 gap-2">
+                {Object.entries(selectedArtifact.inputs).map(([key, value]) => (
+                  value && (
+                    <div key={key} className="flex gap-2">
+                      <span className="text-slate-500 capitalize">{key.replace(/_/g, ' ')}:</span>
+                      <span className="text-slate-900 truncate">{Array.isArray(value) ? value.join(', ') : String(value)}</span>
+                    </div>
+                  )
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Output Sections */}
+          {selectedArtifact.outputSections.map(section => {
+            const content = selectedArtifact.outputs[section.id];
+            if (!content) return null;
+
+            return (
+              <div key={section.id} className="bg-white rounded-lg border border-slate-200 overflow-hidden">
+                <div className="px-4 py-2 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
+                  <h3 className="font-medium text-slate-700 text-sm">{section.label}</h3>
+                  <button
+                    onClick={() => copyToClipboard(content, `artifact-${section.id}`)}
+                    className="text-xs flex items-center gap-1 text-slate-500 hover:text-blue-600"
+                  >
+                    {copiedId === `artifact-${section.id}` ? (
+                      <><Check className="w-3 h-3" /> Copied</>
+                    ) : (
+                      <><Copy className="w-3 h-3" /> Copy</>
+                    )}
+                  </button>
+                </div>
+                <div className="p-4">
+                  {section.format === 'markdown' ? (
+                    <div className="prose prose-sm max-w-none">
+                      <ReactMarkdown>{content}</ReactMarkdown>
+                    </div>
+                  ) : (
+                    <pre className="text-sm text-slate-700 whitespace-pre-wrap font-mono bg-slate-50 p-3 rounded">{content}</pre>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </main>
+      </div>
+    );
   };
 
   // Render Settings Page
@@ -757,6 +1039,14 @@ export default function App() {
                   {currentProvider.icon} {settings.model.split('-').slice(0, 2).join(' ')}
                 </span>
               )}
+              <button onClick={() => setCurrentView('history')} className="p-2 hover:bg-slate-100 rounded-lg relative">
+                <Clock className="w-4 h-4 text-slate-500" />
+                {artifacts.length > 0 && (
+                  <span className="absolute -top-1 -right-1 w-4 h-4 bg-blue-500 text-white text-[10px] rounded-full flex items-center justify-center">
+                    {artifacts.length > 9 ? '9+' : artifacts.length}
+                  </span>
+                )}
+              </button>
               <button onClick={() => setCurrentView('settings')} className="p-2 hover:bg-slate-100 rounded-lg">
                 <Settings className="w-4 h-4 text-slate-500" />
               </button>
@@ -1231,5 +1521,7 @@ export default function App() {
   // Main render
   if (currentView === 'settings') return renderSettings();
   if (currentView === 'workflow') return renderWorkflowPage();
+  if (currentView === 'history') return renderHistory();
+  if (currentView === 'artifact') return renderArtifactDetail();
   return renderDashboard();
 }
