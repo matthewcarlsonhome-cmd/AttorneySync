@@ -73,7 +73,31 @@ function estimateTokens(text) {
 // Local storage keys
 const STORAGE_KEYS = {
   SETTINGS: 'attorneysync_settings',
-  HISTORY: 'attorneysync_history'
+  HISTORY: 'attorneysync_history',
+  CLIENT_PROFILES: 'attorneysync_client_profiles',
+  TEMPLATES: 'attorneysync_templates'
+};
+
+// Workflow chains - define which workflows can chain together
+const WORKFLOW_CHAINS = {
+  'content-strategy-brief': ['seo-blog-article', 'linkedin-content', 'google-ads'],
+  'seo-blog-article': ['linkedin-content', 'website-copy', 'email-newsletter'],
+  'ppc-landing-page': ['google-ads', 'linkedin-content'],
+  'google-ads': ['ppc-landing-page', 'linkedin-content'],
+  'linkedin-content': ['seo-blog-article', 'email-newsletter'],
+  'case-intake-call': ['client-testimonial', 'content-strategy-brief'],
+  'client-testimonial': ['linkedin-content', 'seo-blog-article'],
+  'competitor-analysis': ['content-strategy-brief', 'google-ads', 'ppc-landing-page'],
+  'email-newsletter': ['linkedin-content', 'seo-blog-article'],
+  'website-copy': ['seo-blog-article', 'ppc-landing-page']
+};
+
+// Smart workflow suggestions based on category
+const WORKFLOW_SUGGESTIONS = {
+  'content': ['linkedin-content', 'email-newsletter', 'google-ads'],
+  'advertising': ['ppc-landing-page', 'seo-blog-article', 'linkedin-content'],
+  'social': ['seo-blog-article', 'email-newsletter', 'content-strategy-brief'],
+  'operations': ['content-strategy-brief', 'client-testimonial', 'competitor-analysis']
 };
 
 // Default settings structure
@@ -169,6 +193,26 @@ export default function App() {
   const [artifacts, setArtifacts] = useState([]);
   const [selectedArtifact, setSelectedArtifact] = useState(null);
 
+  // New feature states
+  const [clientProfiles, setClientProfiles] = useState([]);
+  const [selectedClientProfile, setSelectedClientProfile] = useState(null);
+  const [templates, setTemplates] = useState({});
+  const [workflowSearch, setWorkflowSearch] = useState('');
+  const [historySearch, setHistorySearch] = useState('');
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [showClientProfileModal, setShowClientProfileModal] = useState(false);
+  const [showSaveTemplateModal, setShowSaveTemplateModal] = useState(false);
+  const [newTemplateName, setNewTemplateName] = useState('');
+  const [newClientProfile, setNewClientProfile] = useState({
+    name: '',
+    practiceAreas: [],
+    location: '',
+    tone: 'professional',
+    competitors: '',
+    website: '',
+    uniqueValue: ''
+  });
+
   // Load settings from localStorage on mount
   useEffect(() => {
     const saved = localStorage.getItem(STORAGE_KEYS.SETTINGS);
@@ -195,6 +239,24 @@ export default function App() {
         setArtifacts(JSON.parse(savedArtifacts));
       } catch (e) {
         console.error('Failed to load artifacts:', e);
+      }
+    }
+    // Load client profiles
+    const savedProfiles = localStorage.getItem(STORAGE_KEYS.CLIENT_PROFILES);
+    if (savedProfiles) {
+      try {
+        setClientProfiles(JSON.parse(savedProfiles));
+      } catch (e) {
+        console.error('Failed to load client profiles:', e);
+      }
+    }
+    // Load templates
+    const savedTemplates = localStorage.getItem(STORAGE_KEYS.TEMPLATES);
+    if (savedTemplates) {
+      try {
+        setTemplates(JSON.parse(savedTemplates));
+      } catch (e) {
+        console.error('Failed to load templates:', e);
       }
     }
   }, []);
@@ -237,6 +299,180 @@ export default function App() {
     localStorage.removeItem(STORAGE_KEYS.HISTORY);
     setSelectedArtifact(null);
   };
+
+  // Safe localStorage save with quota handling
+  const safeLocalStorageSave = (key, data) => {
+    try {
+      localStorage.setItem(key, JSON.stringify(data));
+      return true;
+    } catch (e) {
+      if (e.name === 'QuotaExceededError') {
+        setError('Storage full. Please clear some history to continue saving.');
+        return false;
+      }
+      console.error('Failed to save to localStorage:', e);
+      return false;
+    }
+  };
+
+  // Client Profile Functions
+  const saveClientProfile = (profile) => {
+    const newProfile = {
+      ...profile,
+      id: Date.now().toString(),
+      createdAt: new Date().toISOString()
+    };
+    const updated = [...clientProfiles, newProfile];
+    setClientProfiles(updated);
+    safeLocalStorageSave(STORAGE_KEYS.CLIENT_PROFILES, updated);
+    return newProfile;
+  };
+
+  const deleteClientProfile = (profileId) => {
+    const updated = clientProfiles.filter(p => p.id !== profileId);
+    setClientProfiles(updated);
+    safeLocalStorageSave(STORAGE_KEYS.CLIENT_PROFILES, updated);
+    if (selectedClientProfile?.id === profileId) {
+      setSelectedClientProfile(null);
+    }
+  };
+
+  const applyClientProfile = (profile) => {
+    if (!selectedWorkflow || !profile) return;
+
+    const newFormData = { ...formData };
+    selectedWorkflow.inputs.forEach(input => {
+      if (input.id === 'client_name' && profile.name) {
+        newFormData[input.id] = profile.name;
+      } else if ((input.id === 'target_location' || input.id === 'location') && profile.location) {
+        newFormData[input.id] = profile.location;
+      } else if (input.id === 'practice_areas' && profile.practiceAreas?.length) {
+        newFormData[input.id] = profile.practiceAreas;
+      } else if (input.id === 'website_url' && profile.website) {
+        newFormData[input.id] = profile.website;
+      } else if (input.id === 'competitors' && profile.competitors) {
+        newFormData[input.id] = profile.competitors;
+      } else if (input.id === 'tone' && profile.tone) {
+        newFormData[input.id] = profile.tone;
+      } else if (input.id === 'unique_value' && profile.uniqueValue) {
+        newFormData[input.id] = profile.uniqueValue;
+      }
+    });
+    setFormData(newFormData);
+    setSelectedClientProfile(profile);
+  };
+
+  // Template Functions
+  const saveTemplate = (workflowId, name, data) => {
+    const workflowTemplates = templates[workflowId] || [];
+    const newTemplate = {
+      id: Date.now().toString(),
+      name,
+      data: { ...data },
+      createdAt: new Date().toISOString()
+    };
+    const updated = {
+      ...templates,
+      [workflowId]: [...workflowTemplates, newTemplate]
+    };
+    setTemplates(updated);
+    safeLocalStorageSave(STORAGE_KEYS.TEMPLATES, updated);
+    return newTemplate;
+  };
+
+  const deleteTemplate = (workflowId, templateId) => {
+    const workflowTemplates = templates[workflowId] || [];
+    const updated = {
+      ...templates,
+      [workflowId]: workflowTemplates.filter(t => t.id !== templateId)
+    };
+    setTemplates(updated);
+    safeLocalStorageSave(STORAGE_KEYS.TEMPLATES, updated);
+  };
+
+  const applyTemplate = (template) => {
+    if (!template?.data) return;
+    setFormData({ ...formData, ...template.data });
+  };
+
+  // Workflow Chaining - get suggested next workflows
+  const getChainedWorkflows = (workflowId) => {
+    const chainIds = WORKFLOW_CHAINS[workflowId] || [];
+    return chainIds.map(id => workflows.find(w => w.id === id)).filter(Boolean);
+  };
+
+  // Smart Suggestions - get suggested workflows based on category
+  const getSuggestedWorkflows = (category) => {
+    const suggestionIds = WORKFLOW_SUGGESTIONS[category] || [];
+    return suggestionIds.map(id => workflows.find(w => w.id === id)).filter(Boolean);
+  };
+
+  // Chain to next workflow with data transfer
+  const chainToWorkflow = (nextWorkflow, currentOutput) => {
+    const initialData = {};
+
+    // Transfer relevant data from current output to next workflow inputs
+    nextWorkflow.inputs.forEach(input => {
+      // Carry over client name
+      if (input.id === 'client_name' && formData.client_name) {
+        initialData[input.id] = formData.client_name;
+      }
+      // Carry over location
+      else if ((input.id === 'target_location' || input.id === 'location') && (formData.target_location || formData.location)) {
+        initialData[input.id] = formData.target_location || formData.location;
+      }
+      // Carry over practice areas
+      else if (input.id === 'practice_areas' && formData.practice_areas) {
+        initialData[input.id] = formData.practice_areas;
+      }
+      // Transfer content brief to article topic
+      else if (input.id === 'topic' && currentOutput?.topic_suggestions) {
+        // Extract first topic from suggestions
+        const topics = currentOutput.topic_suggestions.split('\n').filter(t => t.trim());
+        if (topics.length > 0) {
+          initialData[input.id] = topics[0].replace(/^[\d\.\-\*]+\s*/, '').trim();
+        }
+      }
+      // Transfer article content for social posts
+      else if (input.id === 'content_to_repurpose' && currentOutput?.article_body) {
+        initialData[input.id] = currentOutput.article_body.substring(0, 2000);
+      }
+      // Use defaults
+      else if (input.default !== undefined) {
+        initialData[input.id] = input.default;
+      }
+    });
+
+    setSelectedWorkflow(nextWorkflow);
+    setFormData(initialData);
+    setOutput(null);
+    setRawOutput('');
+    setError(null);
+    setShowSuggestions(false);
+    setCurrentView('workflow');
+  };
+
+  // Filtered workflows for search
+  const filteredWorkflows = workflows.filter(workflow => {
+    if (!workflowSearch.trim()) return true;
+    const search = workflowSearch.toLowerCase();
+    return (
+      workflow.name.toLowerCase().includes(search) ||
+      workflow.description.toLowerCase().includes(search) ||
+      workflow.category.toLowerCase().includes(search)
+    );
+  });
+
+  // Filtered artifacts for history search
+  const filteredArtifacts = artifacts.filter(artifact => {
+    if (!historySearch.trim()) return true;
+    const search = historySearch.toLowerCase();
+    return (
+      artifact.workflowName.toLowerCase().includes(search) ||
+      (artifact.inputs?.client_name || '').toLowerCase().includes(search) ||
+      artifact.workflowCategory.toLowerCase().includes(search)
+    );
+  });
 
   // Save settings to localStorage
   const saveSettings = () => {
@@ -503,6 +739,9 @@ export default function App() {
 
       // Auto-save artifact
       saveArtifact(selectedWorkflow, formData, parsed, content);
+
+      // Show smart suggestions for next workflows
+      setShowSuggestions(true);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -695,6 +934,28 @@ export default function App() {
         </header>
 
         <main className="max-w-4xl mx-auto px-4 py-6">
+          {/* History Search */}
+          {artifacts.length > 0 && (
+            <div className="relative mb-4">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+              <input
+                type="text"
+                placeholder="Search by workflow, client, or category..."
+                value={historySearch}
+                onChange={(e) => setHistorySearch(e.target.value)}
+                className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              {historySearch && (
+                <button
+                  onClick={() => setHistorySearch('')}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+          )}
+
           {artifacts.length === 0 ? (
             <div className="text-center py-12">
               <Clock className="w-12 h-12 text-slate-300 mx-auto mb-4" />
@@ -708,9 +969,15 @@ export default function App() {
                 Browse Workflows
               </button>
             </div>
+          ) : filteredArtifacts.length === 0 ? (
+            <div className="text-center py-8 text-slate-500">
+              <Search className="w-8 h-8 mx-auto mb-2 text-slate-300" />
+              <p>No results match "{historySearch}"</p>
+              <button onClick={() => setHistorySearch('')} className="text-blue-600 text-sm mt-2">Clear search</button>
+            </div>
           ) : (
             <div className="space-y-3">
-              {artifacts.map(artifact => {
+              {filteredArtifacts.map(artifact => {
                 const Icon = iconMap[categories[artifact.workflowCategory]?.icon] || FileText;
                 return (
                   <div
@@ -1044,7 +1311,7 @@ export default function App() {
   // Render Dashboard
   const renderDashboard = () => {
     const groupedWorkflows = {};
-    workflows.forEach(w => {
+    filteredWorkflows.forEach(w => {
       if (!groupedWorkflows[w.category]) groupedWorkflows[w.category] = [];
       groupedWorkflows[w.category].push(w);
     });
@@ -1107,6 +1374,46 @@ export default function App() {
               </div>
             </div>
           </div>
+
+          {/* Search and Quick Actions */}
+          <div className="flex flex-col sm:flex-row gap-3 mb-4">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+              <input
+                type="text"
+                placeholder="Search workflows..."
+                value={workflowSearch}
+                onChange={(e) => setWorkflowSearch(e.target.value)}
+                className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              {workflowSearch && (
+                <button
+                  onClick={() => setWorkflowSearch('')}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+            {clientProfiles.length > 0 && (
+              <div className="flex items-center gap-2 text-sm">
+                <span className="text-slate-500">Quick:</span>
+                {clientProfiles.slice(0, 3).map(profile => (
+                  <span key={profile.id} className="px-2 py-1 bg-blue-50 text-blue-700 rounded text-xs">
+                    {profile.name}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {workflowSearch && filteredWorkflows.length === 0 && (
+            <div className="text-center py-8 text-slate-500">
+              <Search className="w-8 h-8 mx-auto mb-2 text-slate-300" />
+              <p>No workflows match "{workflowSearch}"</p>
+              <button onClick={() => setWorkflowSearch('')} className="text-blue-600 text-sm mt-2">Clear search</button>
+            </div>
+          )}
 
           {/* Workflow Categories with Full Descriptions */}
           <div className="space-y-6">
@@ -1308,8 +1615,51 @@ export default function App() {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {/* Input Form */}
             <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
-              <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-100">
+              <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
                 <span className="text-sm font-medium text-slate-700">Inputs</span>
+                <div className="flex items-center gap-2">
+                  {/* Template Dropdown */}
+                  {(templates[selectedWorkflow.id] || []).length > 0 && (
+                    <select
+                      className="text-xs border border-slate-200 rounded px-2 py-1 bg-white"
+                      onChange={(e) => {
+                        const template = (templates[selectedWorkflow.id] || []).find(t => t.id === e.target.value);
+                        if (template) applyTemplate(template);
+                        e.target.value = '';
+                      }}
+                      defaultValue=""
+                    >
+                      <option value="">Load Template...</option>
+                      {(templates[selectedWorkflow.id] || []).map(t => (
+                        <option key={t.id} value={t.id}>{t.name}</option>
+                      ))}
+                    </select>
+                  )}
+                  {/* Client Profile Dropdown */}
+                  {clientProfiles.length > 0 && (
+                    <select
+                      className="text-xs border border-slate-200 rounded px-2 py-1 bg-white"
+                      value={selectedClientProfile?.id || ''}
+                      onChange={(e) => {
+                        const profile = clientProfiles.find(p => p.id === e.target.value);
+                        if (profile) applyClientProfile(profile);
+                      }}
+                    >
+                      <option value="">Select Client...</option>
+                      {clientProfiles.map(p => (
+                        <option key={p.id} value={p.id}>{p.name}</option>
+                      ))}
+                    </select>
+                  )}
+                  {/* Add Client Profile */}
+                  <button
+                    type="button"
+                    onClick={() => setShowClientProfileModal(true)}
+                    className="text-xs text-blue-600 hover:text-blue-700"
+                  >
+                    + Client
+                  </button>
+                </div>
               </div>
               <form onSubmit={handleSubmit} className="p-4 space-y-4">
                 {selectedWorkflow.inputs.map(input => (
@@ -1398,13 +1748,26 @@ export default function App() {
                   </div>
                 )}
 
-                <button type="submit" disabled={loading} className="w-full py-2.5 btn btn-primary rounded-lg text-sm">
-                  {loading ? (
-                    <><Loader2 className="w-4 h-4 animate-spin" /> Generating...</>
-                  ) : (
-                    <><Sparkles className="w-4 h-4" /> Generate with {currentProvider.icon}</>
-                  )}
-                </button>
+                <div className="flex gap-2">
+                  <button type="submit" disabled={loading} className="flex-1 py-2.5 btn btn-primary rounded-lg text-sm">
+                    {loading ? (
+                      <><Loader2 className="w-4 h-4 animate-spin" /> Generating...</>
+                    ) : (
+                      <><Sparkles className="w-4 h-4" /> Generate with {currentProvider.icon}</>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNewTemplateName('');
+                      setShowSaveTemplateModal(true);
+                    }}
+                    className="px-3 py-2.5 border border-slate-200 rounded-lg text-sm text-slate-600 hover:bg-slate-50"
+                    title="Save as Template"
+                  >
+                    <Save className="w-4 h-4" />
+                  </button>
+                </div>
               </form>
             </div>
 
@@ -1542,7 +1905,206 @@ export default function App() {
               </div>
             </div>
           </div>
+
+          {/* Smart Suggestions Panel - shows after successful generation */}
+          {showSuggestions && output && !loading && (
+            <div className="mt-4 bg-gradient-to-r from-indigo-50 to-blue-50 rounded-lg border border-indigo-200 p-4">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <Zap className="w-4 h-4 text-indigo-600" />
+                  <span className="font-medium text-indigo-900 text-sm">Continue Your Workflow</span>
+                </div>
+                <button
+                  onClick={() => setShowSuggestions(false)}
+                  className="text-indigo-400 hover:text-indigo-600"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <p className="text-xs text-indigo-700 mb-3">Based on your output, these workflows would be great next steps:</p>
+              <div className="flex flex-wrap gap-2">
+                {getChainedWorkflows(selectedWorkflow.id).map(workflow => {
+                  const Icon = iconMap[categories[workflow.category]?.icon] || FileText;
+                  return (
+                    <button
+                      key={workflow.id}
+                      onClick={() => chainToWorkflow(workflow, output)}
+                      className="flex items-center gap-2 px-3 py-2 bg-white rounded-lg border border-indigo-200 hover:border-indigo-400 hover:shadow-sm text-sm transition-all"
+                    >
+                      <Icon className="w-4 h-4 text-indigo-600" />
+                      <span className="text-slate-700">{workflow.name}</span>
+                      <ChevronRight className="w-3 h-3 text-indigo-400" />
+                    </button>
+                  );
+                })}
+                {getChainedWorkflows(selectedWorkflow.id).length === 0 &&
+                  getSuggestedWorkflows(selectedWorkflow.category).map(workflow => {
+                    const Icon = iconMap[categories[workflow.category]?.icon] || FileText;
+                    return (
+                      <button
+                        key={workflow.id}
+                        onClick={() => chainToWorkflow(workflow, output)}
+                        className="flex items-center gap-2 px-3 py-2 bg-white rounded-lg border border-indigo-200 hover:border-indigo-400 hover:shadow-sm text-sm transition-all"
+                      >
+                        <Icon className="w-4 h-4 text-indigo-600" />
+                        <span className="text-slate-700">{workflow.name}</span>
+                        <ChevronRight className="w-3 h-3 text-indigo-400" />
+                      </button>
+                    );
+                  })
+                }
+              </div>
+            </div>
+          )}
         </main>
+
+        {/* Client Profile Modal */}
+        {showClientProfileModal && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-xl max-w-md w-full p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-semibold text-slate-900">New Client Profile</h3>
+                <button onClick={() => setShowClientProfileModal(false)} className="text-slate-400 hover:text-slate-600">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">Client/Firm Name *</label>
+                  <input
+                    type="text"
+                    value={newClientProfile.name}
+                    onChange={(e) => setNewClientProfile(p => ({ ...p, name: e.target.value }))}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
+                    placeholder="Smith & Associates"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">Location</label>
+                  <input
+                    type="text"
+                    value={newClientProfile.location}
+                    onChange={(e) => setNewClientProfile(p => ({ ...p, location: e.target.value }))}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
+                    placeholder="Los Angeles, California"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">Practice Areas</label>
+                  <input
+                    type="text"
+                    value={newClientProfile.practiceAreas.join(', ')}
+                    onChange={(e) => setNewClientProfile(p => ({ ...p, practiceAreas: e.target.value.split(',').map(s => s.trim()).filter(Boolean) }))}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
+                    placeholder="Personal Injury, Car Accidents"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">Website URL</label>
+                  <input
+                    type="text"
+                    value={newClientProfile.website}
+                    onChange={(e) => setNewClientProfile(p => ({ ...p, website: e.target.value }))}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
+                    placeholder="https://smithlaw.com"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">Tone/Voice</label>
+                  <select
+                    value={newClientProfile.tone}
+                    onChange={(e) => setNewClientProfile(p => ({ ...p, tone: e.target.value }))}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
+                  >
+                    <option value="professional">Professional</option>
+                    <option value="empathetic">Empathetic</option>
+                    <option value="authoritative">Authoritative</option>
+                    <option value="conversational">Conversational</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">Unique Value Proposition</label>
+                  <textarea
+                    value={newClientProfile.uniqueValue}
+                    onChange={(e) => setNewClientProfile(p => ({ ...p, uniqueValue: e.target.value }))}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
+                    rows={2}
+                    placeholder="What makes this firm unique?"
+                  />
+                </div>
+              </div>
+              <div className="flex gap-2 mt-4">
+                <button
+                  onClick={() => setShowClientProfileModal(false)}
+                  className="flex-1 px-4 py-2 border border-slate-200 rounded-lg text-sm"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    if (newClientProfile.name.trim()) {
+                      const profile = saveClientProfile(newClientProfile);
+                      applyClientProfile(profile);
+                      setShowClientProfileModal(false);
+                      setNewClientProfile({
+                        name: '', practiceAreas: [], location: '', tone: 'professional',
+                        competitors: '', website: '', uniqueValue: ''
+                      });
+                    }
+                  }}
+                  className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700"
+                >
+                  Save & Apply
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Save Template Modal */}
+        {showSaveTemplateModal && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-xl max-w-sm w-full p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-semibold text-slate-900">Save as Template</h3>
+                <button onClick={() => setShowSaveTemplateModal(false)} className="text-slate-400 hover:text-slate-600">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <p className="text-sm text-slate-500 mb-4">
+                Save current inputs as a reusable template for "{selectedWorkflow.name}"
+              </p>
+              <input
+                type="text"
+                value={newTemplateName}
+                onChange={(e) => setNewTemplateName(e.target.value)}
+                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm mb-4"
+                placeholder="Template name..."
+                autoFocus
+              />
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setShowSaveTemplateModal(false)}
+                  className="flex-1 px-4 py-2 border border-slate-200 rounded-lg text-sm"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    if (newTemplateName.trim()) {
+                      saveTemplate(selectedWorkflow.id, newTemplateName.trim(), formData);
+                      setShowSaveTemplateModal(false);
+                      setNewTemplateName('');
+                    }
+                  }}
+                  className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700"
+                >
+                  Save Template
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   };
