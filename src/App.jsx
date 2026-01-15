@@ -2681,109 +2681,6 @@ export default function App() {
           )}
         </main>
 
-        {/* Client Profile Modal */}
-        {showClientProfileModal && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-xl max-w-md w-full p-6">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="font-semibold text-slate-900">New Client Profile</h3>
-                <button onClick={() => setShowClientProfileModal(false)} className="text-slate-400 hover:text-slate-600">
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-              <div className="space-y-3">
-                <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">Client/Firm Name *</label>
-                  <input
-                    type="text"
-                    value={newClientProfile.name}
-                    onChange={(e) => setNewClientProfile(p => ({ ...p, name: e.target.value }))}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
-                    placeholder="Smith & Associates"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">Location</label>
-                  <input
-                    type="text"
-                    value={newClientProfile.location}
-                    onChange={(e) => setNewClientProfile(p => ({ ...p, location: e.target.value }))}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
-                    placeholder="Los Angeles, California"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">Practice Areas</label>
-                  <input
-                    type="text"
-                    value={newClientProfile.practiceAreas.join(', ')}
-                    onChange={(e) => setNewClientProfile(p => ({ ...p, practiceAreas: e.target.value.split(',').map(s => s.trim()).filter(Boolean) }))}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
-                    placeholder="Personal Injury, Car Accidents"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">Website URL</label>
-                  <input
-                    type="text"
-                    value={newClientProfile.website}
-                    onChange={(e) => setNewClientProfile(p => ({ ...p, website: e.target.value }))}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
-                    placeholder="https://smithlaw.com"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">Tone/Voice</label>
-                  <select
-                    value={newClientProfile.tone}
-                    onChange={(e) => setNewClientProfile(p => ({ ...p, tone: e.target.value }))}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
-                  >
-                    <option value="professional">Professional</option>
-                    <option value="empathetic">Empathetic</option>
-                    <option value="authoritative">Authoritative</option>
-                    <option value="conversational">Conversational</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">Unique Value Proposition</label>
-                  <textarea
-                    value={newClientProfile.uniqueValue}
-                    onChange={(e) => setNewClientProfile(p => ({ ...p, uniqueValue: e.target.value }))}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
-                    rows={2}
-                    placeholder="What makes this firm unique?"
-                  />
-                </div>
-              </div>
-              <div className="flex gap-2 mt-4">
-                <button
-                  onClick={() => setShowClientProfileModal(false)}
-                  className="flex-1 px-4 py-2 border border-slate-200 rounded-lg text-sm"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={() => {
-                    if (newClientProfile.name.trim()) {
-                      const profile = saveClientProfile(newClientProfile);
-                      applyClientProfile(profile);
-                      setShowClientProfileModal(false);
-                      setNewClientProfile({
-                        name: '', practiceAreas: [], location: '', tone: 'professional',
-                        competitors: '', website: '', uniqueValue: ''
-                      });
-                    }
-                  }}
-                  className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700"
-                >
-                  Save & Apply
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
         {/* Save Template Modal */}
         {showSaveTemplateModal && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -2908,11 +2805,124 @@ export default function App() {
     );
   };
 
-  // Main render
-  if (currentView === 'settings') return renderSettings();
-  if (currentView === 'workflow') return renderWorkflowPage();
-  if (currentView === 'history') return renderHistory();
-  if (currentView === 'artifact') return renderArtifactDetail();
-  if (currentView === 'campaign') return renderCampaignBuilder();
-  return renderDashboard();
+  // Main render - wrap with global modals
+  const renderCurrentView = () => {
+    if (currentView === 'settings') return renderSettings();
+    if (currentView === 'workflow') return renderWorkflowPage();
+    if (currentView === 'history') return renderHistory();
+    if (currentView === 'artifact') return renderArtifactDetail();
+    if (currentView === 'campaign') return renderCampaignBuilder();
+    return renderDashboard();
+  };
+
+  return (
+    <>
+      {renderCurrentView()}
+
+      {/* Global Modal: Add Law Firm Profile */}
+      {showClientProfileModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl max-w-md w-full p-6 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-semibold text-slate-900">Add Law Firm Profile</h3>
+              <button onClick={() => setShowClientProfileModal(false)} className="text-slate-400 hover:text-slate-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Law Firm Name *</label>
+                <input
+                  type="text"
+                  value={newClientProfile.name}
+                  onChange={(e) => setNewClientProfile(p => ({ ...p, name: e.target.value }))}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
+                  placeholder="Smith & Associates"
+                  autoFocus
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Target Location *</label>
+                <input
+                  type="text"
+                  value={newClientProfile.location}
+                  onChange={(e) => setNewClientProfile(p => ({ ...p, location: e.target.value }))}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
+                  placeholder="Los Angeles, California"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Practice Areas</label>
+                <input
+                  type="text"
+                  value={newClientProfile.practiceAreas.join(', ')}
+                  onChange={(e) => setNewClientProfile(p => ({ ...p, practiceAreas: e.target.value.split(',').map(s => s.trim()).filter(Boolean) }))}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
+                  placeholder="Personal Injury, Car Accidents, Wrongful Death"
+                />
+                <p className="text-xs text-slate-400 mt-1">Comma-separated list</p>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Website URL</label>
+                <input
+                  type="text"
+                  value={newClientProfile.website}
+                  onChange={(e) => setNewClientProfile(p => ({ ...p, website: e.target.value }))}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
+                  placeholder="https://smithlaw.com"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Brand Voice/Tone</label>
+                <select
+                  value={newClientProfile.tone}
+                  onChange={(e) => setNewClientProfile(p => ({ ...p, tone: e.target.value }))}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white"
+                >
+                  <option value="professional">Professional & Authoritative</option>
+                  <option value="empathetic">Warm & Empathetic</option>
+                  <option value="authoritative">Direct & Confident</option>
+                  <option value="conversational">Friendly & Conversational</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Unique Value Proposition</label>
+                <textarea
+                  value={newClientProfile.uniqueValue}
+                  onChange={(e) => setNewClientProfile(p => ({ ...p, uniqueValue: e.target.value }))}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
+                  rows={2}
+                  placeholder="What makes this firm unique? (e.g., 30+ years experience, no fee unless we win)"
+                />
+              </div>
+            </div>
+            <div className="flex gap-2 mt-4">
+              <button
+                onClick={() => setShowClientProfileModal(false)}
+                className="flex-1 px-4 py-2 border border-slate-200 rounded-lg text-sm hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  if (newClientProfile.name.trim()) {
+                    saveClientProfile(newClientProfile);
+                    setShowClientProfileModal(false);
+                    setNewClientProfile({
+                      name: '', practiceAreas: [], location: '', tone: 'professional',
+                      competitors: '', website: '', uniqueValue: ''
+                    });
+                  }
+                }}
+                disabled={!newClientProfile.name.trim()}
+                className="flex-1 px-4 py-2 bg-purple-600 text-white rounded-lg text-sm hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Save Law Firm
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
 }
