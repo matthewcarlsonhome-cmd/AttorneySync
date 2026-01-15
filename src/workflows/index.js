@@ -3117,14 +3117,14 @@ Generate your output in this exact XML structure:
 | Document Request | [Method] | [When] | [What to request] |
 
 ### CRM Notes Template
-```
+
 CASE TYPE: [Type]
 QUAL SCORE: [X]/10 - [Classification]
 URGENCY: [Level]
 SOL DATE: [Date]
 NEXT ACTION: [Specific action]
 ASSIGNED TO: [Name]
-```
+
 </follow_up_tasks>
 </o>
 
@@ -3655,48 +3655,46 @@ Generate your output in this exact XML structure:
 
 **Options (in this order):**
 
-```
--- Online Search --
-Google Search (organic results)
-Google Ads (paid ad at top)
-Bing/Yahoo Search
-Other Search Engine
+**-- Online Search --**
+- Google Search (organic results)
+- Google Ads (paid ad at top)
+- Bing/Yahoo Search
+- Other Search Engine
 
--- Social Media --
-Facebook - Saw a Post
-Facebook - Clicked an Ad
-Instagram
-LinkedIn
-TikTok
-YouTube
+**-- Social Media --**
+- Facebook - Saw a Post
+- Facebook - Clicked an Ad
+- Instagram
+- LinkedIn
+- TikTok
+- YouTube
 
--- Referrals --
-Referred by Attorney/Law Firm
-Referred by Past Client
-Referred by Friend/Family
-Referred by Doctor/Medical Provider
-Referred by Other Professional
+**-- Referrals --**
+- Referred by Attorney/Law Firm
+- Referred by Past Client
+- Referred by Friend/Family
+- Referred by Doctor/Medical Provider
+- Referred by Other Professional
 
--- Traditional Advertising --
-TV Commercial
-Radio Ad
-Billboard/Outdoor Sign
-Print Ad (Newspaper/Magazine)
-Direct Mail
+**-- Traditional Advertising --**
+- TV Commercial
+- Radio Ad
+- Billboard/Outdoor Sign
+- Print Ad (Newspaper/Magazine)
+- Direct Mail
 
--- Online/Digital --
-Saw Online Reviews
-Avvo
-Lawyers.com
-Yelp
-Legal Directory Website
-News Article/Press
+**-- Online/Digital --**
+- Saw Online Reviews
+- Avvo
+- Lawyers.com
+- Yelp
+- Legal Directory Website
+- News Article/Press
 
--- Other --
-Drove/Walked By Office
-Already Knew the Firm
-Other (please specify)
-```
+**-- Other --**
+- Drove/Walked By Office
+- Already Knew the Firm
+- Other (please specify)
 
 ### Secondary Attribution Field (Optional)
 
@@ -3719,19 +3717,16 @@ Other (please specify)
 
 ### Website Implementation Notes
 
-```html
-<!-- Required field validation -->
-<select name="attribution" required>
-  <option value="">Please select one...</option>
-  <!-- Options as listed above -->
-</select>
+**HTML Structure (for developer reference):**
+- Use a required SELECT element with name="attribution"
+- First option should have empty value with placeholder text
+- Add conditional DIV for referral details (hidden by default)
+- Show referral input field via JavaScript when referral option selected
+- Include text INPUT for referrer_name field
 
-<!-- Conditional referral field (show via JavaScript) -->
-<div id="referral-detail" style="display:none;">
-  <label>Who referred you?</label>
-  <input type="text" name="referrer_name" />
-</div>
-```
+**Form Validation:**
+- Attribution field should be required
+- Referral name field required only when referral option selected
 </form_field_config>
 
 <tracking_categories>
@@ -4261,7 +4256,8 @@ P.S. [Urgency element or secondary benefit]
 
 [Extract 5-6 questions and answers from the blog content for FAQ schema]
 
-```json
+**JSON-LD Structure (FAQPage schema):**
+
 {
   "@context": "https://schema.org",
   "@type": "FAQPage",
@@ -4277,41 +4273,28 @@ P.S. [Urgency element or secondary benefit]
     {
       "@type": "Question",
       "name": "[Question 2]",
-      "acceptedAnswer": {
-        "@type": "Answer",
-        "text": "[Answer 2]"
-      }
+      "acceptedAnswer": { "@type": "Answer", "text": "[Answer 2]" }
     },
     {
       "@type": "Question",
       "name": "[Question 3]",
-      "acceptedAnswer": {
-        "@type": "Answer",
-        "text": "[Answer 3]"
-      }
+      "acceptedAnswer": { "@type": "Answer", "text": "[Answer 3]" }
     },
     {
       "@type": "Question",
       "name": "[Question 4]",
-      "acceptedAnswer": {
-        "@type": "Answer",
-        "text": "[Answer 4]"
-      }
+      "acceptedAnswer": { "@type": "Answer", "text": "[Answer 4]" }
     },
     {
       "@type": "Question",
       "name": "[Question 5]",
-      "acceptedAnswer": {
-        "@type": "Answer",
-        "text": "[Answer 5]"
-      }
+      "acceptedAnswer": { "@type": "Answer", "text": "[Answer 5]" }
     }
   ]
 }
-```
 
 **Implementation Notes:**
-- Add to blog post page within <script type="application/ld+json"> tags
+- Add to blog post page within script tags with type="application/ld+json"
 - Questions should target "People Also Ask" queries
 - Keep answers concise but complete
 </faq_schema>
