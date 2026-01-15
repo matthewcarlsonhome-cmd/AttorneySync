@@ -525,7 +525,7 @@ export default function App() {
     const clientName = formData.client_name || 'output';
     let content = `# ${selectedWorkflow.name}\n\nGenerated: ${dateStr}\n\n---\n\n`;
 
-    selectedWorkflow.outputSections.forEach(section => {
+    (selectedWorkflow.outputSections || []).forEach(section => {
       const sectionContent = output[section.id];
       if (sectionContent) {
         content += `## ${section.label}\n\n${sectionContent}\n\n---\n\n`;
@@ -791,7 +791,7 @@ export default function App() {
                   // Download as markdown
                   const dateStr = new Date(selectedArtifact.timestamp).toISOString().split('T')[0];
                   let content = `# ${selectedArtifact.workflowName}\n\nGenerated: ${dateStr}\n\n---\n\n`;
-                  selectedArtifact.outputSections.forEach(section => {
+                  (selectedArtifact.outputSections || []).forEach(section => {
                     const sectionContent = selectedArtifact.outputs[section.id];
                     if (sectionContent) {
                       content += `## ${section.label}\n\n${sectionContent}\n\n---\n\n`;
@@ -1152,7 +1152,7 @@ export default function App() {
                                 </span>
                                 <span className="text-slate-300">•</span>
                                 <span className="text-xs text-slate-400">
-                                  {workflow.outputSections.length} outputs
+                                  {(workflow.outputSections || []).length} outputs
                                 </span>
                               </div>
                             </div>
@@ -1233,17 +1233,17 @@ export default function App() {
                   {/* Outputs */}
                   <div className="bg-green-50 rounded-lg p-3">
                     <h4 className="text-xs font-semibold text-green-800 mb-2 flex items-center gap-1">
-                      <FileText className="w-3 h-3" /> Generated Outputs ({selectedWorkflow.outputSections.length})
+                      <FileText className="w-3 h-3" /> Generated Outputs ({(selectedWorkflow.outputSections || []).length})
                     </h4>
                     <ul className="text-xs text-green-700 space-y-1">
-                      {selectedWorkflow.outputSections.slice(0, 5).map(section => (
+                      {(selectedWorkflow.outputSections || []).slice(0, 5).map(section => (
                         <li key={section.id} className="flex items-center gap-1.5">
                           <span className="w-1 h-1 bg-green-500 rounded-full" />
                           {section.label}
                         </li>
                       ))}
-                      {selectedWorkflow.outputSections.length > 5 && (
-                        <li className="text-green-600">+{selectedWorkflow.outputSections.length - 5} more...</li>
+                      {(selectedWorkflow.outputSections || []).length > 5 && (
+                        <li className="text-green-600">+{(selectedWorkflow.outputSections || []).length - 5} more...</li>
                       )}
                     </ul>
                   </div>
@@ -1272,7 +1272,7 @@ export default function App() {
                     </span>
                     {isOverLimit && (
                       <span className="text-xs text-amber-600">
-                        (Large for {settings.model.split('-').slice(0,2).join(' ')})
+                        (Large for {(settings.model || 'Unknown').split('-').slice(0,2).join(' ')})
                       </span>
                     )}
                   </div>
@@ -1486,7 +1486,7 @@ export default function App() {
 
                 {!loading && output && (
                   <div className="space-y-4 max-h-[500px] overflow-y-auto">
-                    {selectedWorkflow.outputSections.map(section => {
+                    {(selectedWorkflow.outputSections || []).map(section => {
                       const content = output[section.id];
                       if (!content) return null;
                       return (
