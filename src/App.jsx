@@ -7,7 +7,8 @@ import {
   Phone, TrendingUp, ClipboardList, Mail, Star, PieChart, CheckSquare,
   Download, Upload, Key, Database, Globe, Save, X, Menu, AlertCircle,
   Linkedin, ExternalLink, RefreshCw, Clock, Zap, Shield, Info, Code,
-  ChevronDown, ChevronUp, FileDown, Play, Package, CheckCircle, Circle
+  ChevronDown, ChevronUp, FileDown, Play, Package, CheckCircle, Circle,
+  Calendar, CalendarDays
 } from 'lucide-react';
 
 // Icon mapping
@@ -278,6 +279,12 @@ export default function App() {
   const [campaignProgress, setCampaignProgress] = useState({ current: 0, total: 0, status: 'idle' });
   const [campaignClientProfile, setCampaignClientProfile] = useState(null);
   const [campaignFormData, setCampaignFormData] = useState({});
+
+  // Content Calendar states
+  const [showScheduleModal, setShowScheduleModal] = useState(false);
+  const [scheduleDate, setScheduleDate] = useState('');
+  const [scheduleTime, setScheduleTime] = useState('09:00');
+  const [scheduledPosts, setScheduledPosts] = useState([]);
 
   // Load settings from localStorage on mount
   useEffect(() => {
@@ -1067,8 +1074,8 @@ export default function App() {
     }
   };
 
-  // Publish to WordPress
-  const publishToWordPress = async () => {
+  // Publish to WordPress (with optional scheduling)
+  const publishToWordPress = async (scheduledDateTime = null) => {
     if (!settings.wordpressUrl || !settings.wordpressUsername || !settings.wordpressAppPassword) {
       setWpPublishResult({ success: false, message: 'WordPress credentials not configured. Go to Settings.' });
       return;
@@ -1089,9 +1096,14 @@ export default function App() {
       const postData = {
         title: formData.headline || output.meta_title || 'Untitled Post',
         content: output.article,
-        status: 'draft',
+        status: scheduledDateTime ? 'future' : 'draft',
         excerpt: output.meta_description || '',
       };
+
+      // Add scheduled date if provided
+      if (scheduledDateTime) {
+        postData.date = scheduledDateTime;
+      }
 
       const response = await fetch(`${wpUrl}/wp-json/wp/v2/posts`, {
         method: 'POST',
@@ -1108,17 +1120,54 @@ export default function App() {
       }
 
       const result = await response.json();
-      setWpPublishResult({
-        success: true,
-        message: `Draft created successfully!`,
-        postId: result.id,
-        editUrl: result.link ? result.link.replace(/\/$/, '') + '?preview=true' : null
-      });
+
+      if (scheduledDateTime) {
+        const scheduledDate = new Date(scheduledDateTime);
+        // Add to scheduled posts list
+        setScheduledPosts(prev => [...prev, {
+          id: result.id,
+          title: postData.title,
+          scheduledFor: scheduledDateTime,
+          workflowId: selectedWorkflow?.id,
+          createdAt: new Date().toISOString()
+        }]);
+        setWpPublishResult({
+          success: true,
+          message: `Scheduled for ${scheduledDate.toLocaleDateString()} at ${scheduledDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
+          postId: result.id,
+          editUrl: result.link ? result.link.replace(/\/$/, '') + '?preview=true' : null
+        });
+      } else {
+        setWpPublishResult({
+          success: true,
+          message: `Draft created successfully!`,
+          postId: result.id,
+          editUrl: result.link ? result.link.replace(/\/$/, '') + '?preview=true' : null
+        });
+      }
     } catch (err) {
       setWpPublishResult({ success: false, message: err.message });
     } finally {
       setPublishingToWP(false);
+      setShowScheduleModal(false);
     }
+  };
+
+  // Schedule post to WordPress
+  const handleSchedulePost = () => {
+    if (!scheduleDate) {
+      setWpPublishResult({ success: false, message: 'Please select a date.' });
+      return;
+    }
+    const dateTime = `${scheduleDate}T${scheduleTime}:00`;
+    publishToWordPress(dateTime);
+  };
+
+  // Get default schedule date (tomorrow)
+  const getDefaultScheduleDate = () => {
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    return tomorrow.toISOString().split('T')[0];
   };
 
   // Format relative time
@@ -2380,13 +2429,24 @@ export default function App() {
                       </button>
                     )}
                     {showWordPressButton && output.article && (
-                      <button
-                        onClick={publishToWordPress}
-                        disabled={publishingToWP}
-                        className="px-2 py-1 text-xs bg-purple-50 text-purple-700 rounded hover:bg-purple-100 flex items-center gap-1 disabled:opacity-50"
-                      >
-                        {publishingToWP ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />} WP
-                      </button>
+                      <>
+                        <button
+                          onClick={() => publishToWordPress()}
+                          disabled={publishingToWP}
+                          className="px-2 py-1 text-xs bg-purple-50 text-purple-700 rounded hover:bg-purple-100 flex items-center gap-1 disabled:opacity-50"
+                          title="Save as WordPress Draft"
+                        >
+                          {publishingToWP ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />} Draft
+                        </button>
+                        <button
+                          onClick={() => { setScheduleDate(getDefaultScheduleDate()); setShowScheduleModal(true); }}
+                          disabled={publishingToWP}
+                          className="px-2 py-1 text-xs bg-indigo-50 text-indigo-700 rounded hover:bg-indigo-100 flex items-center gap-1 disabled:opacity-50"
+                          title="Schedule WordPress Post"
+                        >
+                          <Calendar className="w-3 h-3" /> Schedule
+                        </button>
+                      </>
                     )}
                   </div>
                 )}
@@ -2687,6 +2747,82 @@ export default function App() {
                 >
                   Save Template
                 </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Schedule Modal */}
+        {showScheduleModal && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-xl max-w-sm w-full p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-semibold text-slate-900 flex items-center gap-2">
+                  <CalendarDays className="w-5 h-5 text-indigo-600" />
+                  Schedule to WordPress
+                </h3>
+                <button onClick={() => setShowScheduleModal(false)} className="text-slate-400 hover:text-slate-600">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <p className="text-sm text-slate-500 mb-4">
+                Schedule your post to be published automatically at a future date and time.
+              </p>
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Publication Date</label>
+                  <input
+                    type="date"
+                    value={scheduleDate}
+                    onChange={(e) => setScheduleDate(e.target.value)}
+                    min={new Date().toISOString().split('T')[0]}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">Publication Time</label>
+                  <input
+                    type="time"
+                    value={scheduleTime}
+                    onChange={(e) => setScheduleTime(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+                {scheduleDate && (
+                  <div className="bg-indigo-50 rounded-lg p-3 text-sm">
+                    <p className="text-indigo-700">
+                      <strong>Scheduled for:</strong>{' '}
+                      {new Date(`${scheduleDate}T${scheduleTime}`).toLocaleDateString('en-US', {
+                        weekday: 'long',
+                        year: 'numeric',
+                        month: 'long',
+                        day: 'numeric'
+                      })} at {new Date(`${scheduleDate}T${scheduleTime}`).toLocaleTimeString('en-US', {
+                        hour: '2-digit',
+                        minute: '2-digit'
+                      })}
+                    </p>
+                  </div>
+                )}
+                <div className="flex gap-2 pt-2">
+                  <button
+                    onClick={() => setShowScheduleModal(false)}
+                    className="flex-1 px-4 py-2 border border-slate-200 rounded-lg text-sm hover:bg-slate-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleSchedulePost}
+                    disabled={!scheduleDate || publishingToWP}
+                    className="flex-1 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                  >
+                    {publishingToWP ? (
+                      <><Loader2 className="w-4 h-4 animate-spin" /> Scheduling...</>
+                    ) : (
+                      <><Calendar className="w-4 h-4" /> Schedule Post</>
+                    )}
+                  </button>
+                </div>
               </div>
             </div>
           </div>
