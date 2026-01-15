@@ -1318,6 +1318,87 @@ Example: Phoenix_PersonalInjury_Search
 [List specific cities/areas with +/- adjustments based on case value potential]
 </campaign_settings>
 
+<keyword_research>
+## Comprehensive Keyword Research
+
+### High-Intent Keywords (Hire Now)
+| Keyword | Match Type | Search Vol | Est. CPC | Priority |
+|---------|------------|------------|----------|----------|
+[Generate 20+ high-intent keywords - "lawyer near me", "attorney for", "hire", "best"]
+
+### Consultation Keywords
+| Keyword | Match Type | Search Vol | Est. CPC | Priority |
+|---------|------------|------------|----------|----------|
+[Generate 15+ consultation keywords - "free consultation", "case review", "talk to lawyer"]
+
+### Research Intent Keywords
+| Keyword | Match Type | Search Vol | Est. CPC | Priority |
+|---------|------------|------------|----------|----------|
+[Generate 15+ research keywords - "how much does", "do I need", "what to do after"]
+
+### Location-Modified Keywords
+| Keyword | Match Type | Search Vol | Est. CPC | Priority |
+|---------|------------|------------|----------|----------|
+[Generate 20+ location-specific keywords with city/area modifiers]
+
+### Long-Tail Opportunity Keywords
+| Keyword | Match Type | Search Vol | Est. CPC | Priority |
+|---------|------------|------------|----------|----------|
+[Generate 15+ long-tail specific keywords with lower competition]
+
+**Total Keywords Generated:** [X] keywords across [X] match types
+</keyword_research>
+
+<ads>
+## Ad Copy Library (Multiple Variants for A/B Testing)
+
+### RSA Set 1: Trust & Experience Focus
+**Headlines (30 char max - showing character count):**
+1. [Headline text] (XX chars)
+2. [Headline text] (XX chars)
+3. [Headline text] (XX chars)
+4. [Headline text] (XX chars)
+5. [Headline text] (XX chars)
+6. [Headline text] (XX chars)
+7. [Headline text] (XX chars)
+8. [Headline text] (XX chars)
+9. [Headline text] (XX chars)
+10. [Headline text] (XX chars)
+11. [Headline text] (XX chars)
+12. [Headline text] (XX chars)
+13. [Headline text] (XX chars)
+14. [Headline text] (XX chars)
+15. [Headline text] (XX chars)
+
+**Descriptions (90 char max - showing character count):**
+1. [Description with clear CTA] (XX chars)
+2. [Description highlighting unique value] (XX chars)
+3. [Description with trust signals] (XX chars)
+4. [Description with urgency/availability] (XX chars)
+
+---
+
+### RSA Set 2: Results & Social Proof Focus
+**Headlines (30 char max):**
+1-15. [15 different headlines focusing on results, case values, reviews]
+
+**Descriptions (90 char max):**
+1-4. [4 descriptions highlighting outcomes and testimonials]
+
+---
+
+### RSA Set 3: Urgency & Availability Focus
+**Headlines (30 char max):**
+1-15. [15 different headlines focusing on 24/7, same-day, immediate help]
+
+**Descriptions (90 char max):**
+1-4. [4 descriptions with urgency messaging and quick response promises]
+
+**Pin Recommendations:**
+- Pin headline 1-3 positions: [Specific recommendations]
+- Pin description 1-2 positions: [Specific recommendations]
+</ads>
+
 <ad_groups>
 ## Ad Group Structure
 
@@ -1326,24 +1407,55 @@ Example: Phoenix_PersonalInjury_Search
 **Keywords:**
 | Keyword | Match Type | Est. CPC |
 |---------|------------|----------|
-[10-15 keywords with match types]
+[15-20 keywords with match types]
 
-**Responsive Search Ad:**
-Headlines (30 char max each):
-1. [Headline - include char count]
-2. [Headline - include char count]
-...up to 15 headlines
-
-Descriptions (90 char max each):
-1. [Description - include char count]
-2. [Description - include char count]
-3. [Description - include char count]
-4. [Description - include char count]
-
+**Assigned RSA:** Set 1 (Trust & Experience)
 **Final URL:** [Landing page URL]
 **Display Path:** /[path1]/[path2]
 
-[Repeat for 3-5 ad groups]
+### Ad Group 2: [Name - Consultation Intent]
+**Theme:** [Free consultation seekers]
+**Keywords:**
+| Keyword | Match Type | Est. CPC |
+|---------|------------|----------|
+[15-20 keywords with match types]
+
+**Assigned RSA:** Set 2 (Results Focus)
+**Final URL:** [Landing page URL]
+**Display Path:** /[path1]/[path2]
+
+### Ad Group 3: [Name - Emergency/Urgent]
+**Theme:** [Immediate need keywords]
+**Keywords:**
+| Keyword | Match Type | Est. CPC |
+|---------|------------|----------|
+[15-20 keywords with match types]
+
+**Assigned RSA:** Set 3 (Urgency Focus)
+**Final URL:** [Landing page URL]
+**Display Path:** /[path1]/[path2]
+
+### Ad Group 4: [Name - Location Specific]
+**Theme:** [City/neighborhood specific]
+**Keywords:**
+| Keyword | Match Type | Est. CPC |
+|---------|------------|----------|
+[15-20 keywords with match types]
+
+**Assigned RSA:** Set 1 (Trust & Experience)
+**Final URL:** [Landing page URL]
+**Display Path:** /[path1]/[path2]
+
+### Ad Group 5: [Name - Research/Informational]
+**Theme:** [Information seekers who may convert]
+**Keywords:**
+| Keyword | Match Type | Est. CPC |
+|---------|------------|----------|
+[10-15 keywords with match types]
+
+**Assigned RSA:** Set 2 (Results Focus)
+**Final URL:** [Landing page URL]
+**Display Path:** /[path1]/[path2]
 </ad_groups>
 
 <negative_keywords>
@@ -1450,12 +1562,14 @@ Generate a complete, production-ready Google Ads campaign that can be immediatel
     outputSections: [
       { id: "campaign_name", label: "Campaign Name", format: "text" },
       { id: "campaign_settings", label: "Campaign Settings", format: "markdown" },
-      { id: "ad_groups", label: "Ad Groups", format: "markdown" },
+      { id: "keyword_research", label: "Keyword Research (85+ Keywords)", format: "markdown" },
+      { id: "ads", label: "Ad Copy Library (3 RSA Sets)", format: "markdown" },
+      { id: "ad_groups", label: "Ad Groups (5 Groups)", format: "markdown" },
       { id: "negative_keywords", label: "Negative Keywords", format: "list" },
       { id: "extensions", label: "Extensions", format: "markdown" },
-      { id: "csv_data", label: "CSV for Upload", format: "code" }
+      { id: "csv_data", label: "CSV Files for Google Ads Editor", format: "code" }
     ],
-    estimatedTime: "90-120 seconds",
+    estimatedTime: "120-180 seconds",
     outputActions: ["copy", "download_csv", "download_xlsx"]
   },
 
@@ -4652,47 +4766,145 @@ YOUR EXPERTISE INCLUDES:
 </campaign_structure>
 
 <ad_copy_variations>
-## Ad Copy Variations
+## Ad Copy Library (10 Variants for A/B Testing)
 
-### Version A: Empathy-Led
-**Primary Text (125 chars):**
-[Ad copy focusing on understanding client pain points]
+### Version A1: Empathy-Led (Pain Point Focus)
+**Primary Text (125 chars max):**
+[Ad copy focusing on understanding client pain points - show char count]
 
-**Headline (40 chars):**
-[Headline]
+**Headline (40 chars max):**
+[Headline - show char count]
 
-**Description (30 chars):**
-[Description]
+**Description (30 chars max):**
+[Description - show char count]
 
-**CTA Button:** [Learn More / Contact Us / Get Quote / Sign Up]
-
----
-
-### Version B: Authority-Led
-**Primary Text (125 chars):**
-[Ad copy focusing on firm expertise and results]
-
-**Headline (40 chars):**
-[Headline]
-
-**Description (30 chars):**
-[Description]
-
-**CTA Button:** [Recommended CTA]
+**CTA Button:** Learn More
 
 ---
 
-### Version C: Urgency-Led
-**Primary Text (125 chars):**
+### Version A2: Empathy-Led (Support Focus)
+**Primary Text (125 chars max):**
+[Different empathy angle - support during difficult time]
+
+**Headline (40 chars max):**
+[Headline variation]
+
+**Description (30 chars max):**
+[Description variation]
+
+**CTA Button:** Contact Us
+
+---
+
+### Version B1: Authority-Led (Experience)
+**Primary Text (125 chars max):**
+[Ad copy focusing on years of experience and expertise]
+
+**Headline (40 chars max):**
+[Headline]
+
+**Description (30 chars max):**
+[Description]
+
+**CTA Button:** Get Quote
+
+---
+
+### Version B2: Authority-Led (Results)
+**Primary Text (125 chars max):**
+[Ad copy focusing on case results and outcomes]
+
+**Headline (40 chars max):**
+[Headline]
+
+**Description (30 chars max):**
+[Description]
+
+**CTA Button:** Learn More
+
+---
+
+### Version C1: Urgency-Led (Limited Time)
+**Primary Text (125 chars max):**
 [Ad copy with time-sensitive messaging]
 
-**Headline (40 chars):**
+**Headline (40 chars max):**
 [Headline]
 
-**Description (30 chars):**
+**Description (30 chars max):**
 [Description]
 
-**CTA Button:** [Recommended CTA]
+**CTA Button:** Sign Up
+
+---
+
+### Version C2: Urgency-Led (Act Now)
+**Primary Text (125 chars max):**
+[Different urgency angle - don't wait]
+
+**Headline (40 chars max):**
+[Headline]
+
+**Description (30 chars max):**
+[Description]
+
+**CTA Button:** Contact Us
+
+---
+
+### Version D1: Social Proof (Reviews)
+**Primary Text (125 chars max):**
+[Ad copy highlighting reviews and ratings]
+
+**Headline (40 chars max):**
+[Headline]
+
+**Description (30 chars max):**
+[Description]
+
+**CTA Button:** Learn More
+
+---
+
+### Version D2: Social Proof (Case Count)
+**Primary Text (125 chars max):**
+[Ad copy highlighting number of cases handled]
+
+**Headline (40 chars max):**
+[Headline]
+
+**Description (30 chars max):**
+[Description]
+
+**CTA Button:** Get Quote
+
+---
+
+### Version E1: Value Proposition (Free Consult)
+**Primary Text (125 chars max):**
+[Ad copy highlighting free consultation]
+
+**Headline (40 chars max):**
+[Headline]
+
+**Description (30 chars max):**
+[Description]
+
+**CTA Button:** Sign Up
+
+---
+
+### Version E2: Value Proposition (No Fee)
+**Primary Text (125 chars max):**
+[Ad copy highlighting no fee unless you win]
+
+**Headline (40 chars max):**
+[Headline]
+
+**Description (30 chars max):**
+[Description]
+
+**CTA Button:** Contact Us
 </ad_copy_variations>
 
 <instagram_specific>
@@ -4799,18 +5011,58 @@ YOUR EXPERTISE INCLUDES:
 
 **Landing Page Requirements:**
 - [What the landing page must include]
-</compliance_notes>`,
+</compliance_notes>
+
+<bulk_upload_csv>
+## Meta Ads Manager Bulk Upload CSV
+
+### Campaign CSV (Ads Manager Import Format)
+Campaign Name,Objective,Status,Daily Budget,Lifetime Budget
+[campaign_name],LEAD_GENERATION,PAUSED,[daily_budget],
+
+### Ad Set CSV
+Campaign Name,Ad Set Name,Status,Daily Budget,Start Date,End Date,Optimization Goal,Billing Event,Bid Strategy,Targeting
+[campaign_name],[ad_set_1_name],PAUSED,[budget],,,,LEAD_GENERATION,IMPRESSIONS,LOWEST_COST_WITHOUT_CAP,"[targeting_json]"
+[campaign_name],[ad_set_2_name],PAUSED,[budget],,,,LEAD_GENERATION,IMPRESSIONS,LOWEST_COST_WITHOUT_CAP,"[targeting_json]"
+[campaign_name],[ad_set_3_name],PAUSED,[budget],,,,LEAD_GENERATION,IMPRESSIONS,LOWEST_COST_WITHOUT_CAP,"[targeting_json]"
+
+### Ads CSV (All 10 Variants)
+Campaign Name,Ad Set Name,Ad Name,Status,Creative Type,Primary Text,Headline,Description,Call to Action,Website URL
+[campaign_name],[ad_set_name],Ad_A1_Empathy_Pain,PAUSED,SINGLE_IMAGE,"[primary_text_A1]","[headline_A1]","[description_A1]",LEARN_MORE,[website_url]
+[campaign_name],[ad_set_name],Ad_A2_Empathy_Support,PAUSED,SINGLE_IMAGE,"[primary_text_A2]","[headline_A2]","[description_A2]",CONTACT_US,[website_url]
+[campaign_name],[ad_set_name],Ad_B1_Authority_Exp,PAUSED,SINGLE_IMAGE,"[primary_text_B1]","[headline_B1]","[description_B1]",GET_QUOTE,[website_url]
+[campaign_name],[ad_set_name],Ad_B2_Authority_Results,PAUSED,SINGLE_IMAGE,"[primary_text_B2]","[headline_B2]","[description_B2]",LEARN_MORE,[website_url]
+[campaign_name],[ad_set_name],Ad_C1_Urgency_Limited,PAUSED,SINGLE_IMAGE,"[primary_text_C1]","[headline_C1]","[description_C1]",SIGN_UP,[website_url]
+[campaign_name],[ad_set_name],Ad_C2_Urgency_ActNow,PAUSED,SINGLE_IMAGE,"[primary_text_C2]","[headline_C2]","[description_C2]",CONTACT_US,[website_url]
+[campaign_name],[ad_set_name],Ad_D1_Proof_Reviews,PAUSED,SINGLE_IMAGE,"[primary_text_D1]","[headline_D1]","[description_D1]",LEARN_MORE,[website_url]
+[campaign_name],[ad_set_name],Ad_D2_Proof_Cases,PAUSED,SINGLE_IMAGE,"[primary_text_D2]","[headline_D2]","[description_D2]",GET_QUOTE,[website_url]
+[campaign_name],[ad_set_name],Ad_E1_Value_Consult,PAUSED,SINGLE_IMAGE,"[primary_text_E1]","[headline_E1]","[description_E1]",SIGN_UP,[website_url]
+[campaign_name],[ad_set_name],Ad_E2_Value_NoFee,PAUSED,SINGLE_IMAGE,"[primary_text_E2]","[headline_E2]","[description_E2]",CONTACT_US,[website_url]
+
+### Instagram Stories Ads CSV
+Campaign Name,Ad Set Name,Ad Name,Status,Placement,Creative Type,Primary Text,Call to Action
+[campaign_name],[ad_set_name],Story_Ad_1,PAUSED,INSTAGRAM_STORIES,SINGLE_IMAGE,"[story_text_1]",SWIPE_UP
+[campaign_name],[ad_set_name],Story_Ad_2,PAUSED,INSTAGRAM_STORIES,SINGLE_IMAGE,"[story_text_2]",SWIPE_UP
+
+**Import Instructions:**
+1. Download each CSV section separately
+2. Go to Meta Ads Manager > Bulk Actions > Import
+3. Select "Import ads from file"
+4. Upload Campaign CSV first, then Ad Sets, then Ads
+5. Review and publish when ready
+</bulk_upload_csv>`,
     outputSections: [
       { id: "campaign_structure", label: "Campaign Structure", format: "markdown" },
-      { id: "ad_copy_variations", label: "Ad Copy Variations", format: "markdown" },
+      { id: "ad_copy_variations", label: "Ad Copy Library (10 Variants)", format: "markdown" },
       { id: "instagram_specific", label: "Instagram Content", format: "markdown" },
       { id: "audience_targeting", label: "Audience Targeting", format: "markdown" },
       { id: "lead_form", label: "Lead Form Setup", format: "markdown" },
       { id: "budget_recommendations", label: "Budget Strategy", format: "markdown" },
-      { id: "compliance_notes", label: "Compliance Notes", format: "markdown" }
+      { id: "compliance_notes", label: "Compliance Notes", format: "markdown" },
+      { id: "bulk_upload_csv", label: "CSV Files for Meta Ads Manager", format: "code" }
     ],
-    estimatedTime: "35-50 seconds",
-    outputActions: ["copy", "download_docx"]
+    estimatedTime: "60-90 seconds",
+    outputActions: ["copy", "download_csv", "download_docx"]
   },
 
   {
