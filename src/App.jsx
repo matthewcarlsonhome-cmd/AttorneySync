@@ -297,6 +297,8 @@ export default function App() {
   const [campaignStep, setCampaignStep] = useState(1); // 1: Select Firm, 2: Select Workflows, 3: Configure Inputs, 4: Review & Run, 5: Results
   const [campaignInputs, setCampaignInputs] = useState({}); // Stores inputs for each workflow by workflow ID
   const [currentConfigWorkflow, setCurrentConfigWorkflow] = useState(0); // Index of workflow being configured
+  const [streamingContent, setStreamingContent] = useState(''); // Current streaming content during campaign execution
+  const [currentStreamingWorkflow, setCurrentStreamingWorkflow] = useState(null); // Name of workflow currently streaming
 
   // Load settings from localStorage on mount
   useEffect(() => {
@@ -769,6 +771,8 @@ export default function App() {
     setCampaignStep(5);
     setCampaignProgress({ current: 0, total: campaignWorkflows.length, status: 'running' });
     setCampaignResults([]);
+    setStreamingContent('');
+    setCurrentStreamingWorkflow(null);
     setError(null);
 
     const results = [];
@@ -776,16 +780,27 @@ export default function App() {
     for (let i = 0; i < campaignWorkflows.length; i++) {
       const workflow = campaignWorkflows[i];
       setCampaignProgress({ current: i + 1, total: campaignWorkflows.length, status: 'running' });
+      setCurrentStreamingWorkflow(workflow.name);
+      setStreamingContent('');
 
       try {
         const workflowFormData = campaignInputs[workflow.id] || {};
         const userMessage = buildUserMessage(workflow, workflowFormData);
 
+        // Stream callback to update UI in real-time
+        const onStreamChunk = (content) => {
+          setStreamingContent(content);
+        };
+
         const content = await callAPIStreaming(
           workflow.systemPrompt,
           userMessage,
-          () => {}
+          onStreamChunk
         );
+
+        // Clear streaming state after workflow completes
+        setStreamingContent('');
+        setCurrentStreamingWorkflow(null);
 
         const parsed = parseXMLOutput(content, workflow.outputSections);
 
@@ -804,11 +819,29 @@ export default function App() {
         setCampaignResults([...results]);
         saveArtifact(workflow, workflowFormData, parsed, content);
       } catch (err) {
+        // Clear streaming state on error
+        setStreamingContent('');
+        setCurrentStreamingWorkflow(null);
+
+        // Parse error for user-friendly message
+        let errorMessage = err.message;
+        if (err.message.includes('Invalid x-api-key') || err.message.includes('401')) {
+          errorMessage = 'Invalid API key. Please check your API key in Settings.';
+        } else if (err.message.includes('Failed to fetch') || err.message.includes('NetworkError')) {
+          errorMessage = 'Network error. Please check your internet connection and try again.';
+        } else if (err.message.includes('timeout') || err.message.includes('Timeout')) {
+          errorMessage = 'Request timed out. The server took too long to respond. Please try again.';
+        } else if (err.message.includes('429') || err.message.includes('rate limit')) {
+          errorMessage = 'Rate limit exceeded. Please wait a moment and try again.';
+        } else if (err.message.includes('500') || err.message.includes('502') || err.message.includes('503')) {
+          errorMessage = 'Server error from AI provider. Please try again in a few moments.';
+        }
+
         results.push({
           workflowId: workflow.id,
           workflowName: workflow.name,
           workflowColor: workflow.color,
-          error: err.message,
+          error: errorMessage,
           timestamp: new Date().toISOString()
         });
         setCampaignResults([...results]);
@@ -886,6 +919,12 @@ export default function App() {
   // Streaming API call based on provider
   const callAPIStreaming = async (systemPrompt, userMessage, onChunk) => {
     const apiKey = getCurrentApiKey();
+
+    // Validate API key
+    if (!apiKey) {
+      throw new Error('API key not configured. Please add your API key in Settings.');
+    }
+
     const modelConfig = getModelConfig(settings.provider, settings.model);
     const maxTokens = modelConfig.maxOutput;
 
@@ -895,39 +934,45 @@ export default function App() {
       throw new Error(`Input too large for ${settings.model}. Estimated ${totalInputTokens.toLocaleString()} tokens, limit is ${modelConfig.contextLimit.toLocaleString()}. Try a model with higher context limit.`);
     }
 
+    // Setup timeout controller (3 minutes for long-running requests)
+    const TIMEOUT_MS = 180000;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
+
     let fullContent = '';
 
-    if (settings.provider === 'anthropic') {
-      const response = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': apiKey,
-          'anthropic-version': '2023-06-01',
-          'anthropic-dangerous-direct-browser-access': 'true'
-        },
-        body: JSON.stringify({
-          model: settings.model,
-          max_tokens: maxTokens,
-          stream: true,
-          system: systemPrompt,
-          messages: [{ role: 'user', content: userMessage }]
-        })
-      });
+    try {
+      if (settings.provider === 'anthropic') {
+        const response = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          signal: controller.signal,
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': apiKey,
+            'anthropic-version': '2023-06-01',
+            'anthropic-dangerous-direct-browser-access': 'true'
+          },
+          body: JSON.stringify({
+            model: settings.model,
+            max_tokens: maxTokens,
+            stream: true,
+            system: systemPrompt,
+            messages: [{ role: 'user', content: userMessage }]
+          })
+        });
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error?.message || `API Error: ${response.status}`);
-      }
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(errorData.error?.message || `API Error: ${response.status}`);
+        }
 
-      if (!response.body) {
-        throw new Error('Response body is empty');
-      }
+        if (!response.body) {
+          throw new Error('Response body is empty');
+        }
 
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
 
-      try {
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
@@ -951,42 +996,37 @@ export default function App() {
             }
           }
         }
-      } catch (streamError) {
-        throw new Error(`Stream reading failed: ${streamError.message}`);
-      }
-    }
+      } else if (settings.provider === 'openai') {
+        const response = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          signal: controller.signal,
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`
+          },
+          body: JSON.stringify({
+            model: settings.model,
+            max_tokens: maxTokens,
+            stream: true,
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: userMessage }
+            ]
+          })
+        });
 
-    else if (settings.provider === 'openai') {
-      const response = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`
-        },
-        body: JSON.stringify({
-          model: settings.model,
-          max_tokens: maxTokens,
-          stream: true,
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: userMessage }
-          ]
-        })
-      });
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(errorData.error?.message || `API Error: ${response.status}`);
+        }
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error?.message || `API Error: ${response.status}`);
-      }
+        if (!response.body) {
+          throw new Error('Response body is empty');
+        }
 
-      if (!response.body) {
-        throw new Error('Response body is empty');
-      }
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
 
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-
-      try {
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
@@ -1011,38 +1051,33 @@ export default function App() {
             }
           }
         }
-      } catch (streamError) {
-        throw new Error(`Stream reading failed: ${streamError.message}`);
-      }
-    }
+      } else if (settings.provider === 'google') {
+        // Google uses streamGenerateContent with alt=sse
+        const response = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${settings.model}:streamGenerateContent?alt=sse&key=${apiKey}`,
+          {
+            method: 'POST',
+            signal: controller.signal,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [{ parts: [{ text: `${systemPrompt}\n\n${userMessage}` }] }],
+              generationConfig: { maxOutputTokens: maxTokens }
+            })
+          }
+        );
 
-    else if (settings.provider === 'google') {
-      // Google uses streamGenerateContent with alt=sse
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${settings.model}:streamGenerateContent?alt=sse&key=${apiKey}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: `${systemPrompt}\n\n${userMessage}` }] }],
-            generationConfig: { maxOutputTokens: maxTokens }
-          })
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(errorData.error?.message || `API Error: ${response.status}`);
         }
-      );
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error?.message || `API Error: ${response.status}`);
-      }
+        if (!response.body) {
+          throw new Error('Response body is empty');
+        }
 
-      if (!response.body) {
-        throw new Error('Response body is empty');
-      }
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
 
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-
-      try {
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
@@ -1066,12 +1101,18 @@ export default function App() {
             }
           }
         }
-      } catch (streamError) {
-        throw new Error(`Stream reading failed: ${streamError.message}`);
       }
-    }
 
-    return fullContent;
+      return fullContent;
+    } catch (err) {
+      // Handle abort (timeout) errors
+      if (err.name === 'AbortError') {
+        throw new Error('Request timed out after 3 minutes. Please try again or use a simpler prompt.');
+      }
+      throw err;
+    } finally {
+      clearTimeout(timeoutId);
+    }
   };
 
   // Handle form submission with streaming
@@ -1115,7 +1156,22 @@ export default function App() {
       // Show smart suggestions for next workflows
       setShowSuggestions(true);
     } catch (err) {
-      setError(err.message);
+      // Parse error for user-friendly message
+      let errorMessage = err.message;
+      if (err.message.includes('Invalid x-api-key') || err.message.includes('401') || err.message.includes('Unauthorized')) {
+        errorMessage = 'Invalid API key. Please check your API key in Settings.';
+      } else if (err.message.includes('Failed to fetch') || err.message.includes('NetworkError') || err.message.includes('fetch')) {
+        errorMessage = 'Network error. Please check your internet connection and try again.';
+      } else if (err.message.includes('timeout') || err.message.includes('Timeout') || err.message.includes('aborted')) {
+        errorMessage = 'Request timed out. The server took too long to respond. Please try again.';
+      } else if (err.message.includes('429') || err.message.includes('rate limit') || err.message.includes('Rate limit')) {
+        errorMessage = 'Rate limit exceeded. Please wait a moment and try again.';
+      } else if (err.message.includes('500') || err.message.includes('502') || err.message.includes('503') || err.message.includes('Internal')) {
+        errorMessage = 'Server error from AI provider. Please try again in a few moments.';
+      } else if (err.message.includes('API key not configured')) {
+        errorMessage = `API key not configured. Please go to Settings and add your ${MODEL_PROVIDERS[settings.provider].name} API key.`;
+      }
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -1794,14 +1850,40 @@ export default function App() {
 
               {/* Progress */}
               {isRunning && (
-                <div className="bg-white rounded-xl p-4 border border-slate-200">
-                  <div className="flex justify-between text-sm text-slate-600 mb-2">
-                    <span>Processing workflow {campaignProgress.current} of {campaignProgress.total}</span>
-                    <span>{Math.round((campaignProgress.current / campaignProgress.total) * 100)}%</span>
+                <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
+                  <div className="flex justify-between text-sm text-slate-600 mb-3">
+                    <span className="font-medium">Processing workflow {campaignProgress.current} of {campaignProgress.total}</span>
+                    <span className="text-indigo-600 font-semibold">{Math.round((campaignProgress.current / campaignProgress.total) * 100)}%</span>
                   </div>
-                  <div className="h-3 bg-slate-100 rounded-full overflow-hidden">
+                  <div className="h-3 bg-slate-100 rounded-full overflow-hidden mb-4">
                     <div className="h-full bg-gradient-to-r from-indigo-500 to-purple-500 transition-all duration-500" style={{ width: `${(campaignProgress.current / campaignProgress.total) * 100}%` }} />
                   </div>
+
+                  {/* Currently Streaming Workflow */}
+                  {currentStreamingWorkflow && (
+                    <div className="border-t border-slate-100 pt-4">
+                      <div className="flex items-center gap-2 mb-3">
+                        <Loader2 className="w-4 h-4 text-indigo-500 animate-spin" />
+                        <span className="text-sm font-semibold text-slate-700">Generating: {currentStreamingWorkflow}</span>
+                      </div>
+                      {streamingContent ? (
+                        <div className="bg-slate-50 rounded-xl p-4 max-h-64 overflow-y-auto">
+                          <pre className="text-xs text-slate-600 whitespace-pre-wrap font-mono leading-relaxed">
+                            {streamingContent.length > 2000 ? streamingContent.substring(0, 2000) + '...' : streamingContent}
+                          </pre>
+                        </div>
+                      ) : (
+                        <div className="bg-slate-50 rounded-xl p-4 flex items-center gap-3">
+                          <div className="flex space-x-1">
+                            <div className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                            <div className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                            <div className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                          </div>
+                          <span className="text-sm text-slate-500">Waiting for response from AI...</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
 
