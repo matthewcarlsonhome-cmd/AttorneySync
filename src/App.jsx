@@ -150,12 +150,19 @@ const CAMPAIGN_PRESETS = [
   }
 ];
 
-// Environment variables for default API keys (set in .env file)
+// Environment variables for default API keys (set in .env file or Netlify)
 const ENV_API_KEYS = {
-  anthropic: import.meta.env.VITE_ANTHROPIC_API_KEY || '',
-  openai: import.meta.env.VITE_OPENAI_API_KEY || '',
-  google: import.meta.env.VITE_GOOGLE_API_KEY || ''
+  anthropic: (import.meta.env.VITE_ANTHROPIC_API_KEY || '').trim(),
+  openai: (import.meta.env.VITE_OPENAI_API_KEY || '').trim(),
+  google: (import.meta.env.VITE_GOOGLE_API_KEY || '').trim()
 };
+
+// Debug: Log env key status (remove in production)
+console.log('ENV Keys Status:', {
+  anthropic: ENV_API_KEYS.anthropic ? `${ENV_API_KEYS.anthropic.substring(0, 10)}...` : 'NOT SET',
+  openai: ENV_API_KEYS.openai ? `${ENV_API_KEYS.openai.substring(0, 8)}...` : 'NOT SET',
+  google: ENV_API_KEYS.google ? `${ENV_API_KEYS.google.substring(0, 8)}...` : 'NOT SET'
+});
 
 // Check if any env keys are configured
 const hasEnvKeys = Object.values(ENV_API_KEYS).some(key => key.length > 0);
@@ -285,6 +292,11 @@ export default function App() {
   const [scheduleDate, setScheduleDate] = useState('');
   const [scheduleTime, setScheduleTime] = useState('09:00');
   const [scheduledPosts, setScheduledPosts] = useState([]);
+
+  // Campaign Wizard states
+  const [campaignStep, setCampaignStep] = useState(1); // 1: Select Firm, 2: Select Workflows, 3: Configure Inputs, 4: Review & Run, 5: Results
+  const [campaignInputs, setCampaignInputs] = useState({}); // Stores inputs for each workflow by workflow ID
+  const [currentConfigWorkflow, setCurrentConfigWorkflow] = useState(0); // Index of workflow being configured
 
   // Load settings from localStorage on mount
   useEffect(() => {
@@ -696,6 +708,114 @@ export default function App() {
     setCampaignResults([]);
     setCampaignProgress({ current: 0, total: 0, status: 'idle' });
     setCampaignFormData({});
+    setCampaignStep(1);
+    setCampaignInputs({});
+    setCurrentConfigWorkflow(0);
+    setCampaignClientProfile(null);
+  };
+
+  // Initialize campaign inputs for selected workflows
+  const initializeCampaignInputs = () => {
+    const inputs = {};
+    campaignWorkflows.forEach(workflow => {
+      inputs[workflow.id] = {};
+      workflow.inputs.forEach(input => {
+        // Pre-fill from client profile if available
+        if (input.id === 'client_name' && campaignClientProfile?.name) {
+          inputs[workflow.id][input.id] = campaignClientProfile.name;
+        } else if ((input.id === 'target_location' || input.id === 'location') && campaignClientProfile?.location) {
+          inputs[workflow.id][input.id] = campaignClientProfile.location;
+        } else if (input.id === 'practice_areas' && campaignClientProfile?.practiceAreas?.length) {
+          inputs[workflow.id][input.id] = campaignClientProfile.practiceAreas;
+        } else if (input.id === 'website_url' && campaignClientProfile?.website) {
+          inputs[workflow.id][input.id] = campaignClientProfile.website;
+        } else if (input.id === 'tone' && campaignClientProfile?.tone) {
+          inputs[workflow.id][input.id] = campaignClientProfile.tone;
+        } else if (input.default !== undefined) {
+          inputs[workflow.id][input.id] = input.default;
+        } else {
+          inputs[workflow.id][input.id] = input.type === 'checkbox' ? false : '';
+        }
+      });
+    });
+    setCampaignInputs(inputs);
+  };
+
+  // Check if a workflow has all required inputs filled
+  const isWorkflowReady = (workflow) => {
+    const workflowInputs = campaignInputs[workflow.id] || {};
+    return workflow.inputs
+      .filter(input => input.required)
+      .every(input => {
+        const value = workflowInputs[input.id];
+        if (Array.isArray(value)) return value.length > 0;
+        return value !== undefined && value !== '';
+      });
+  };
+
+  // Check if all workflows are ready
+  const allWorkflowsReady = () => {
+    return campaignWorkflows.every(workflow => isWorkflowReady(workflow));
+  };
+
+  // Run campaign with configured inputs
+  const runCampaignWithInputs = async () => {
+    const apiKey = getCurrentApiKey();
+    if (!apiKey) {
+      setError(`API key not configured. Please go to Settings and add your ${MODEL_PROVIDERS[settings.provider].name} API key.`);
+      return;
+    }
+
+    setCampaignStep(5);
+    setCampaignProgress({ current: 0, total: campaignWorkflows.length, status: 'running' });
+    setCampaignResults([]);
+    setError(null);
+
+    const results = [];
+
+    for (let i = 0; i < campaignWorkflows.length; i++) {
+      const workflow = campaignWorkflows[i];
+      setCampaignProgress({ current: i + 1, total: campaignWorkflows.length, status: 'running' });
+
+      try {
+        const workflowFormData = campaignInputs[workflow.id] || {};
+        const userMessage = buildUserMessage(workflow, workflowFormData);
+
+        const content = await callAPIStreaming(
+          workflow.systemPrompt,
+          userMessage,
+          () => {}
+        );
+
+        const parsed = parseXMLOutput(content, workflow.outputSections);
+
+        const result = {
+          workflowId: workflow.id,
+          workflowName: workflow.name,
+          workflowColor: workflow.color,
+          inputs: workflowFormData,
+          outputs: parsed,
+          rawContent: content,
+          outputSections: workflow.outputSections,
+          timestamp: new Date().toISOString()
+        };
+
+        results.push(result);
+        setCampaignResults([...results]);
+        saveArtifact(workflow, workflowFormData, parsed, content);
+      } catch (err) {
+        results.push({
+          workflowId: workflow.id,
+          workflowName: workflow.name,
+          workflowColor: workflow.color,
+          error: err.message,
+          timestamp: new Date().toISOString()
+        });
+        setCampaignResults([...results]);
+      }
+    }
+
+    setCampaignProgress({ current: campaignWorkflows.length, total: campaignWorkflows.length, status: 'complete' });
   };
 
   // Filtered workflows for search
@@ -728,7 +848,13 @@ export default function App() {
   };
 
   // Get current API key
-  const getCurrentApiKey = () => settings.apiKeys?.[settings.provider] || '';
+  const getCurrentApiKey = () => {
+    const localKey = settings.apiKeys?.[settings.provider] || '';
+    const envKey = ENV_API_KEYS[settings.provider] || '';
+    // Use local key if set, otherwise fall back to env key
+    const key = localKey || envKey;
+    return key.trim();
+  };
 
   // Handle workflow selection
   const selectWorkflow = (workflow) => {
@@ -1192,273 +1318,278 @@ export default function App() {
     setCurrentView('artifact');
   };
 
-  // Render Campaign Builder Page
+  // Render Campaign Builder Page - Step-based Wizard
   const renderCampaignBuilder = () => {
     const hasApiKey = !!getCurrentApiKey();
     const currentProvider = MODEL_PROVIDERS[settings.provider];
     const isRunning = campaignProgress.status === 'running';
     const isComplete = campaignProgress.status === 'complete';
+    const currentWorkflow = campaignWorkflows[currentConfigWorkflow];
+
+    const steps = [
+      { num: 1, label: 'Select Firm', icon: Database },
+      { num: 2, label: 'Choose Workflows', icon: Layers },
+      { num: 3, label: 'Configure Inputs', icon: PenTool },
+      { num: 4, label: 'Run Campaign', icon: Play }
+    ];
+
+    // Handle advancing to next step
+    const nextStep = () => {
+      if (campaignStep === 2 && campaignWorkflows.length > 0) {
+        initializeCampaignInputs();
+        setCurrentConfigWorkflow(0);
+      }
+      setCampaignStep(prev => Math.min(prev + 1, 5));
+    };
+
+    const prevStep = () => {
+      if (campaignStep === 5) {
+        resetCampaign();
+      } else {
+        setCampaignStep(prev => Math.max(prev - 1, 1));
+      }
+    };
+
+    // Render input field for workflow configuration
+    const renderInputField = (input, workflowId) => {
+      const value = campaignInputs[workflowId]?.[input.id] ?? '';
+      const onChange = (newValue) => {
+        setCampaignInputs(prev => ({
+          ...prev,
+          [workflowId]: { ...prev[workflowId], [input.id]: newValue }
+        }));
+      };
+
+      if (input.type === 'select') {
+        return (
+          <select
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+          >
+            <option value="">Select...</option>
+            {(input.options || []).map(opt => (
+              <option key={opt} value={opt}>{opt}</option>
+            ))}
+          </select>
+        );
+      }
+      if (input.type === 'textarea') {
+        return (
+          <textarea
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            placeholder={input.placeholder}
+            rows={input.rows || 3}
+            className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 resize-none"
+          />
+        );
+      }
+      if (input.type === 'checkbox') {
+        return (
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={!!value}
+              onChange={(e) => onChange(e.target.checked)}
+              className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+            />
+            <span className="text-sm text-slate-600">{input.label}</span>
+          </label>
+        );
+      }
+      return (
+        <input
+          type={input.type || 'text'}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={input.placeholder}
+          className="w-full px-3 py-2.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+        />
+      );
+    };
 
     return (
-      <div className="min-h-screen bg-slate-50">
-        <header className="bg-white border-b border-slate-200 sticky top-0 z-50">
-          <div className="max-w-6xl mx-auto px-4 h-12 flex items-center justify-between">
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-indigo-50">
+        {/* Header */}
+        <header className="bg-white/80 backdrop-blur-sm border-b border-slate-200/50 sticky top-0 z-50">
+          <div className="max-w-5xl mx-auto px-4 h-14 flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <button onClick={() => { setCurrentView('dashboard'); resetCampaign(); }} className="p-2 hover:bg-slate-100 rounded-lg">
-                <ArrowLeft className="w-4 h-4 text-slate-500" />
+              <button onClick={() => { setCurrentView('dashboard'); resetCampaign(); }} className="p-2 hover:bg-slate-100 rounded-lg transition-colors">
+                <ArrowLeft className="w-5 h-5 text-slate-500" />
               </button>
-              <Package className="w-5 h-5 text-indigo-600" />
-              <span className="font-semibold text-slate-900">Campaign Builder</span>
-              {campaignWorkflows.length > 0 && (
-                <span className="text-xs px-2 py-1 bg-indigo-100 text-indigo-700 rounded">
-                  {campaignWorkflows.length} workflows selected
-                </span>
-              )}
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center">
+                  <Package className="w-4 h-4 text-white" />
+                </div>
+                <span className="font-bold text-slate-900">Campaign Builder</span>
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              {hasApiKey && (
-                <span className="text-xs px-2 py-1 bg-slate-100 rounded text-slate-600">
-                  {currentProvider.icon} {(settings.model || 'Unknown').split('-').slice(0, 2).join(' ')}
-                </span>
-              )}
-            </div>
+            {hasApiKey && (
+              <span className="text-xs px-3 py-1.5 bg-slate-100 rounded-full text-slate-600 font-medium">
+                {currentProvider.icon} {(settings.model || 'Unknown').split('-').slice(0, 2).join(' ')}
+              </span>
+            )}
           </div>
         </header>
 
-        <main className="max-w-6xl mx-auto px-4 py-4">
+        {/* Step Progress Indicator */}
+        {campaignStep < 5 && (
+          <div className="bg-white border-b border-slate-100">
+            <div className="max-w-5xl mx-auto px-4 py-4">
+              <div className="flex items-center justify-between">
+                {steps.map((step, idx) => {
+                  const StepIcon = step.icon;
+                  const isActive = campaignStep === step.num;
+                  const isCompleted = campaignStep > step.num;
+                  return (
+                    <div key={step.num} className="flex items-center">
+                      <div className={`flex items-center gap-2 ${isActive ? 'text-indigo-600' : isCompleted ? 'text-green-600' : 'text-slate-400'}`}>
+                        <div className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${
+                          isActive ? 'bg-indigo-100 ring-2 ring-indigo-500 ring-offset-2' :
+                          isCompleted ? 'bg-green-100' : 'bg-slate-100'
+                        }`}>
+                          {isCompleted ? <Check className="w-5 h-5" /> : <StepIcon className="w-5 h-5" />}
+                        </div>
+                        <span className={`text-sm font-medium hidden sm:block ${isActive ? 'text-indigo-600' : isCompleted ? 'text-green-600' : 'text-slate-500'}`}>
+                          {step.label}
+                        </span>
+                      </div>
+                      {idx < steps.length - 1 && (
+                        <div className={`w-12 sm:w-24 h-0.5 mx-2 ${isCompleted ? 'bg-green-300' : 'bg-slate-200'}`} />
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+
+        <main className="max-w-5xl mx-auto px-4 py-6">
           {error && (
-            <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4 flex items-center gap-3 text-sm">
-              <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0" />
-              <span className="text-red-800">{error}</span>
-              <button onClick={() => setError(null)} className="ml-auto text-red-600 hover:text-red-800">
-                <X className="w-4 h-4" />
+            <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-6 flex items-center gap-3">
+              <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0" />
+              <span className="text-red-800 text-sm flex-1">{error}</span>
+              <button onClick={() => setError(null)} className="text-red-500 hover:text-red-700">
+                <X className="w-5 h-5" />
               </button>
             </div>
           )}
 
-          {/* Campaign Results View */}
-          {campaignResults.length > 0 && (
-            <div className="mb-6">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-                  {isComplete ? <CheckCircle className="w-5 h-5 text-green-600" /> : <Loader2 className="w-5 h-5 text-indigo-600 animate-spin" />}
-                  Campaign Results {isComplete && `(${campaignResults.filter(r => !r.error).length}/${campaignResults.length} successful)`}
-                </h2>
-                <div className="flex items-center gap-2">
-                  {isComplete && (
-                    <>
-                      <button
-                        onClick={exportCampaignAsZip}
-                        className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
-                      >
-                        <Download className="w-4 h-4" />
-                        Export All
-                      </button>
-                      <button
-                        onClick={resetCampaign}
-                        className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100 rounded-lg"
-                      >
-                        <RefreshCw className="w-4 h-4" />
-                        New Campaign
-                      </button>
-                    </>
-                  )}
-                </div>
+          {/* Step 1: Select Law Firm */}
+          {campaignStep === 1 && (
+            <div className="space-y-6">
+              <div className="text-center mb-8">
+                <h1 className="text-2xl font-bold text-slate-900 mb-2">Select Your Law Firm</h1>
+                <p className="text-slate-500">Choose a law firm profile to auto-fill campaign details</p>
               </div>
 
-              {/* Progress Bar */}
-              {isRunning && (
-                <div className="mb-4">
-                  <div className="flex items-center justify-between text-sm text-slate-600 mb-1">
-                    <span>Running workflow {campaignProgress.current} of {campaignProgress.total}...</span>
-                    <span>{Math.round((campaignProgress.current / campaignProgress.total) * 100)}%</span>
+              {clientProfiles.length === 0 ? (
+                <div className="bg-white rounded-2xl border border-slate-200 p-8 text-center shadow-sm">
+                  <div className="w-16 h-16 rounded-full bg-amber-100 flex items-center justify-center mx-auto mb-4">
+                    <Database className="w-8 h-8 text-amber-600" />
                   </div>
-                  <div className="w-full h-2 bg-slate-200 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-indigo-600 transition-all duration-300"
-                      style={{ width: `${(campaignProgress.current / campaignProgress.total) * 100}%` }}
-                    />
-                  </div>
+                  <h3 className="text-lg font-semibold text-slate-900 mb-2">No Law Firms Yet</h3>
+                  <p className="text-slate-500 mb-6 max-w-md mx-auto">Create a law firm profile to save time by auto-filling client information across all workflows.</p>
+                  <button
+                    onClick={() => { setShowClientProfileModal(true); }}
+                    className="px-6 py-3 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-xl font-semibold hover:from-indigo-700 hover:to-purple-700 transition-all shadow-lg shadow-indigo-200"
+                  >
+                    + Add Your First Law Firm
+                  </button>
                 </div>
-              )}
-
-              {/* Results Cards */}
-              <div className="space-y-4">
-                {campaignResults.map((result, index) => (
-                  <div key={index} className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-                    <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <div
-                          className="w-8 h-8 rounded-lg flex items-center justify-center"
-                          style={{ backgroundColor: (result.workflowColor || '#6366f1') + '15' }}
-                        >
-                          {result.error ? (
-                            <AlertCircle className="w-4 h-4 text-red-500" />
-                          ) : (
-                            <CheckCircle className="w-4 h-4" style={{ color: result.workflowColor || '#6366f1' }} />
+              ) : (
+                <div className="grid gap-4">
+                  {clientProfiles.map(profile => (
+                    <button
+                      key={profile.id}
+                      onClick={() => { setCampaignClientProfile(profile); nextStep(); }}
+                      className={`w-full p-5 rounded-2xl border-2 text-left transition-all hover:shadow-lg ${
+                        campaignClientProfile?.id === profile.id
+                          ? 'border-indigo-500 bg-indigo-50 shadow-lg shadow-indigo-100'
+                          : 'border-slate-200 bg-white hover:border-indigo-300'
+                      }`}
+                    >
+                      <div className="flex items-center gap-4">
+                        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white font-bold text-lg">
+                          {profile.name.charAt(0)}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <h3 className="font-semibold text-slate-900 text-lg">{profile.name}</h3>
+                          <p className="text-slate-500 text-sm">{profile.location || 'No location set'}</p>
+                          {profile.practiceAreas?.length > 0 && (
+                            <div className="flex gap-1 mt-2 flex-wrap">
+                              {profile.practiceAreas.slice(0, 3).map(area => (
+                                <span key={area} className="text-xs px-2 py-0.5 bg-slate-100 text-slate-600 rounded-full">{area}</span>
+                              ))}
+                              {profile.practiceAreas.length > 3 && (
+                                <span className="text-xs px-2 py-0.5 bg-slate-100 text-slate-600 rounded-full">+{profile.practiceAreas.length - 3}</span>
+                              )}
+                            </div>
                           )}
                         </div>
-                        <div>
-                          <h3 className="font-medium text-slate-900">{result.workflowName}</h3>
-                          {result.error && <p className="text-xs text-red-600">Error: {result.error}</p>}
-                        </div>
+                        <ChevronRight className="w-5 h-5 text-slate-400" />
                       </div>
-                      {!result.error && (
-                        <button
-                          onClick={() => copyToClipboard(result.rawContent, `campaign-${index}`)}
-                          className="text-xs flex items-center gap-1 text-slate-500 hover:text-blue-600 px-2 py-1"
-                        >
-                          {copiedId === `campaign-${index}` ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-                          {copiedId === `campaign-${index}` ? 'Copied' : 'Copy All'}
-                        </button>
-                      )}
-                    </div>
-                    {!result.error && (
-                      <div className="p-4 max-h-64 overflow-y-auto">
-                        {(result.outputSections || []).slice(0, 2).map(section => {
-                          const content = result.outputs?.[section.id];
-                          if (!content) return null;
-                          return (
-                            <div key={section.id} className="mb-3">
-                              <h4 className="text-xs font-medium text-slate-500 uppercase mb-1">{section.label}</h4>
-                              <div className="text-sm text-slate-700 line-clamp-4">
-                                {content.substring(0, 500)}{content.length > 500 ? '...' : ''}
-                              </div>
-                            </div>
-                          );
-                        })}
-                        {(result.outputSections || []).length > 2 && (
-                          <p className="text-xs text-slate-400">+ {(result.outputSections || []).length - 2} more sections</p>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
+                    </button>
+                  ))}
+                  <button
+                    onClick={() => setShowClientProfileModal(true)}
+                    className="w-full p-4 rounded-xl border-2 border-dashed border-slate-300 text-slate-500 hover:border-indigo-400 hover:text-indigo-600 transition-colors flex items-center justify-center gap-2"
+                  >
+                    <span className="text-xl">+</span> Add New Law Firm
+                  </button>
+                </div>
+              )}
             </div>
           )}
 
-          {/* Campaign Setup (show when not running and no results) */}
-          {!isRunning && campaignResults.length === 0 && (
-            <>
-              {/* Law Firm Selection */}
-              <div className="bg-white rounded-xl border border-slate-200 p-4 mb-4">
-                <h3 className="font-semibold text-slate-900 mb-3 flex items-center gap-2">
-                  <Database className="w-4 h-4 text-indigo-600" />
-                  Select Law Firm
-                  <span className="text-xs text-slate-400 font-normal">(Required)</span>
-                </h3>
-                {clientProfiles.length === 0 ? (
-                  <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-center">
-                    <Database className="w-8 h-8 mx-auto mb-2 text-amber-400" />
-                    <p className="text-sm text-amber-800 font-medium">No law firm profiles yet</p>
-                    <p className="text-xs text-amber-600 mt-1">Add a law firm profile to auto-fill all workflows in your campaign</p>
+          {/* Step 2: Choose Workflows */}
+          {campaignStep === 2 && (
+            <div className="space-y-6">
+              <div className="text-center mb-8">
+                <h1 className="text-2xl font-bold text-slate-900 mb-2">Choose Your Workflows</h1>
+                <p className="text-slate-500">Select a preset campaign or pick individual workflows</p>
+              </div>
+
+              {/* Quick Presets */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
+                {CAMPAIGN_PRESETS.map(preset => {
+                  const PresetIcon = iconMap[preset.icon] || Package;
+                  const isSelected = preset.workflowIds.every(id => campaignWorkflows.find(w => w.id === id));
+                  return (
                     <button
-                      onClick={() => setCurrentView('settings')}
-                      className="mt-3 px-4 py-2 bg-amber-600 text-white rounded-lg text-sm hover:bg-amber-700"
+                      key={preset.id}
+                      onClick={() => selectCampaignPreset(preset)}
+                      className={`p-5 rounded-2xl border-2 text-left transition-all hover:shadow-lg ${
+                        isSelected ? 'border-indigo-500 bg-indigo-50 shadow-lg shadow-indigo-100' : 'border-slate-200 bg-white hover:border-indigo-300'
+                      }`}
                     >
-                      Go to Settings to Add Law Firm
-                    </button>
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    <select
-                      value={campaignClientProfile?.id || ''}
-                      onChange={(e) => {
-                        const profile = clientProfiles.find(p => p.id === e.target.value);
-                        setCampaignClientProfile(profile || null);
-                      }}
-                      className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-white cursor-pointer"
-                    >
-                      <option value="">-- Select a Law Firm --</option>
-                      {clientProfiles.map(profile => (
-                        <option key={profile.id} value={profile.id}>
-                          {profile.name} {profile.location ? `(${profile.location})` : ''}
-                        </option>
-                      ))}
-                    </select>
-                    {campaignClientProfile && (
-                      <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-3">
-                        <div className="flex items-center gap-2 mb-2">
-                          <CheckCircle className="w-4 h-4 text-indigo-600" />
-                          <span className="font-medium text-indigo-900">{campaignClientProfile.name}</span>
+                      <div className="flex items-center gap-3 mb-3">
+                        <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ backgroundColor: preset.color + '20' }}>
+                          <PresetIcon className="w-5 h-5" style={{ color: preset.color }} />
                         </div>
-                        <div className="text-xs text-indigo-700 space-y-1">
-                          {campaignClientProfile.location && <div>Location: {campaignClientProfile.location}</div>}
-                          {campaignClientProfile.practiceAreas?.length > 0 && (
-                            <div>Practice Areas: {campaignClientProfile.practiceAreas.join(', ')}</div>
-                          )}
-                          {campaignClientProfile.website && <div>Website: {campaignClientProfile.website}</div>}
+                        <div className="flex-1">
+                          <h4 className="font-semibold text-slate-900">{preset.name}</h4>
+                          <span className="text-xs text-slate-400">{preset.workflowIds.length} workflows • {preset.estimatedTime}</span>
                         </div>
+                        {isSelected && <CheckCircle className="w-5 h-5 text-indigo-600" />}
                       </div>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {/* Campaign Presets */}
-              <div className="mb-4">
-                <h3 className="font-semibold text-slate-900 mb-3 flex items-center gap-2">
-                  <Zap className="w-4 h-4 text-amber-500" />
-                  Quick Start Presets
-                </h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                  {CAMPAIGN_PRESETS.map(preset => {
-                    const PresetIcon = iconMap[preset.icon] || Package;
-                    const isSelected = preset.workflowIds.every(id =>
-                      campaignWorkflows.find(w => w.id === id)
-                    ) && campaignWorkflows.length === preset.workflowIds.length;
-
-                    return (
-                      <button
-                        key={preset.id}
-                        onClick={() => selectCampaignPreset(preset)}
-                        className={`p-4 rounded-xl border-2 text-left transition-all ${
-                          isSelected
-                            ? 'border-indigo-500 bg-indigo-50'
-                            : 'border-slate-200 bg-white hover:border-slate-300 hover:shadow-sm'
-                        }`}
-                      >
-                        <div className="flex items-start gap-3">
-                          <div
-                            className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0"
-                            style={{ backgroundColor: preset.color + '15' }}
-                          >
-                            <PresetIcon className="w-5 h-5" style={{ color: preset.color }} />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <h4 className="font-semibold text-slate-900">{preset.name}</h4>
-                            <p className="text-xs text-slate-500 mt-0.5">{preset.description}</p>
-                            <div className="flex items-center gap-2 mt-2 text-xs text-slate-400">
-                              <span>{preset.workflowIds.length} workflows</span>
-                              <span>•</span>
-                              <span>{preset.estimatedTime}</span>
-                            </div>
-                          </div>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Custom Workflow Selection */}
-              <div className="bg-white rounded-xl border border-slate-200 p-4 mb-4">
-                <div className="flex items-center justify-between mb-3">
-                  <h3 className="font-semibold text-slate-900 flex items-center gap-2">
-                    <Layers className="w-4 h-4 text-slate-500" />
-                    Select Workflows
-                  </h3>
-                  {campaignWorkflows.length > 0 && (
-                    <button
-                      onClick={() => setCampaignWorkflows([])}
-                      className="text-xs text-slate-500 hover:text-slate-700"
-                    >
-                      Clear all
+                      <p className="text-sm text-slate-500">{preset.description}</p>
                     </button>
+                  );
+                })}
+              </div>
+
+              {/* Individual Workflows */}
+              <div className="bg-white rounded-2xl border border-slate-200 p-5">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="font-semibold text-slate-900">Or Select Individual Workflows</h3>
+                  {campaignWorkflows.length > 0 && (
+                    <button onClick={() => setCampaignWorkflows([])} className="text-xs text-slate-500 hover:text-red-500">Clear All</button>
                   )}
                 </div>
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
                   {workflows.map(workflow => {
                     const isSelected = campaignWorkflows.find(w => w.id === workflow.id);
                     const WIcon = iconMap[workflow.icon] || FileText;
@@ -1466,21 +1597,14 @@ export default function App() {
                       <button
                         key={workflow.id}
                         onClick={() => toggleCampaignWorkflow(workflow)}
-                        disabled={!hasApiKey}
-                        className={`p-3 rounded-lg border-2 text-left transition-all disabled:opacity-50 ${
-                          isSelected
-                            ? 'border-indigo-500 bg-indigo-50'
-                            : 'border-slate-200 hover:border-slate-300'
+                        className={`p-3 rounded-xl border-2 text-left transition-all ${
+                          isSelected ? 'border-indigo-500 bg-indigo-50' : 'border-slate-100 hover:border-slate-300'
                         }`}
                       >
                         <div className="flex items-center gap-2">
-                          {isSelected ? (
-                            <CheckCircle className="w-4 h-4 text-indigo-600 flex-shrink-0" />
-                          ) : (
-                            <Circle className="w-4 h-4 text-slate-300 flex-shrink-0" />
-                          )}
-                          <WIcon className="w-4 h-4 flex-shrink-0" style={{ color: workflow.color }} />
-                          <span className="font-medium text-sm text-slate-900 truncate">{workflow.name}</span>
+                          {isSelected ? <CheckCircle className="w-4 h-4 text-indigo-600" /> : <Circle className="w-4 h-4 text-slate-300" />}
+                          <WIcon className="w-4 h-4" style={{ color: workflow.color }} />
+                          <span className="text-sm font-medium text-slate-800 truncate">{workflow.name}</span>
                         </div>
                       </button>
                     );
@@ -1488,48 +1612,241 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Selected Workflows Order */}
-              {campaignWorkflows.length > 0 && (
-                <div className="bg-slate-50 rounded-xl border border-slate-200 p-4 mb-4">
-                  <h3 className="font-semibold text-slate-900 mb-3">Execution Order</h3>
-                  <div className="flex flex-wrap gap-2">
-                    {campaignWorkflows.map((workflow, index) => {
-                      const WIcon = iconMap[workflow.icon] || FileText;
-                      return (
-                        <div
-                          key={workflow.id}
-                          className="flex items-center gap-2 px-3 py-2 bg-white rounded-lg border border-slate-200"
-                        >
-                          <span className="w-5 h-5 rounded-full bg-indigo-600 text-white text-xs flex items-center justify-center">
-                            {index + 1}
-                          </span>
-                          <WIcon className="w-4 h-4" style={{ color: workflow.color }} />
-                          <span className="text-sm font-medium text-slate-900">{workflow.name}</span>
-                          <button
-                            onClick={() => toggleCampaignWorkflow(workflow)}
-                            className="text-slate-400 hover:text-red-500 ml-1"
-                          >
-                            <X className="w-3 h-3" />
-                          </button>
-                        </div>
-                      );
-                    })}
+              {/* Navigation */}
+              <div className="flex justify-between pt-4">
+                <button onClick={prevStep} className="px-6 py-3 border border-slate-200 rounded-xl text-slate-600 hover:bg-slate-50 font-medium">
+                  Back
+                </button>
+                <button
+                  onClick={nextStep}
+                  disabled={campaignWorkflows.length === 0}
+                  className="px-8 py-3 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-xl font-semibold hover:from-indigo-700 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-indigo-200"
+                >
+                  Configure Inputs ({campaignWorkflows.length})
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Step 3: Configure Inputs */}
+          {campaignStep === 3 && currentWorkflow && (
+            <div className="space-y-6">
+              {/* Workflow Tabs */}
+              <div className="flex gap-2 overflow-x-auto pb-2">
+                {campaignWorkflows.map((workflow, idx) => {
+                  const WIcon = iconMap[workflow.icon] || FileText;
+                  const isReady = isWorkflowReady(workflow);
+                  return (
+                    <button
+                      key={workflow.id}
+                      onClick={() => setCurrentConfigWorkflow(idx)}
+                      className={`flex items-center gap-2 px-4 py-2 rounded-xl whitespace-nowrap transition-all ${
+                        idx === currentConfigWorkflow
+                          ? 'bg-indigo-600 text-white shadow-lg'
+                          : isReady
+                            ? 'bg-green-50 text-green-700 border border-green-200'
+                            : 'bg-white text-slate-600 border border-slate-200 hover:border-indigo-300'
+                      }`}
+                    >
+                      <span className="w-5 h-5 rounded-full bg-white/20 text-xs flex items-center justify-center font-bold">
+                        {idx === currentConfigWorkflow ? idx + 1 : isReady ? <Check className="w-3 h-3" /> : idx + 1}
+                      </span>
+                      <WIcon className="w-4 h-4" />
+                      <span className="text-sm font-medium">{workflow.name}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Current Workflow Configuration */}
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                <div className="px-6 py-4 bg-gradient-to-r from-slate-50 to-slate-100 border-b border-slate-200">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ backgroundColor: currentWorkflow.color + '20' }}>
+                      {(() => { const WIcon = iconMap[currentWorkflow.icon] || FileText; return <WIcon className="w-5 h-5" style={{ color: currentWorkflow.color }} />; })()}
+                    </div>
+                    <div>
+                      <h2 className="font-bold text-slate-900">{currentWorkflow.name}</h2>
+                      <p className="text-sm text-slate-500">{currentWorkflow.description?.substring(0, 80)}...</p>
+                    </div>
+                  </div>
+                </div>
+                <div className="p-6 space-y-5">
+                  {currentWorkflow.inputs.map(input => (
+                    <div key={input.id}>
+                      <label className="block text-sm font-medium text-slate-700 mb-1.5">
+                        {input.label}
+                        {input.required && <span className="text-red-500 ml-1">*</span>}
+                      </label>
+                      {renderInputField(input, currentWorkflow.id)}
+                      {input.helpText && <p className="text-xs text-slate-400 mt-1">{input.helpText}</p>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Navigation */}
+              <div className="flex justify-between pt-4">
+                <button onClick={prevStep} className="px-6 py-3 border border-slate-200 rounded-xl text-slate-600 hover:bg-slate-50 font-medium">
+                  Back to Workflows
+                </button>
+                <div className="flex gap-3">
+                  {currentConfigWorkflow > 0 && (
+                    <button onClick={() => setCurrentConfigWorkflow(prev => prev - 1)} className="px-4 py-3 border border-slate-200 rounded-xl text-slate-600 hover:bg-slate-50">
+                      ← Previous
+                    </button>
+                  )}
+                  {currentConfigWorkflow < campaignWorkflows.length - 1 ? (
+                    <button
+                      onClick={() => setCurrentConfigWorkflow(prev => prev + 1)}
+                      className="px-6 py-3 bg-indigo-600 text-white rounded-xl font-medium hover:bg-indigo-700"
+                    >
+                      Next Workflow →
+                    </button>
+                  ) : (
+                    <button
+                      onClick={nextStep}
+                      disabled={!allWorkflowsReady()}
+                      className="px-8 py-3 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-xl font-semibold hover:from-indigo-700 hover:to-purple-700 disabled:opacity-50 shadow-lg shadow-indigo-200"
+                    >
+                      Review & Run Campaign
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Step 4: Review & Run */}
+          {campaignStep === 4 && (
+            <div className="space-y-6">
+              <div className="text-center mb-8">
+                <h1 className="text-2xl font-bold text-slate-900 mb-2">Ready to Launch!</h1>
+                <p className="text-slate-500">Review your campaign and start generating content</p>
+              </div>
+
+              <div className="bg-white rounded-2xl border border-slate-200 p-6">
+                <div className="flex items-center gap-4 mb-6 pb-6 border-b border-slate-100">
+                  <div className="w-14 h-14 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white font-bold text-xl">
+                    {campaignClientProfile?.name?.charAt(0) || '?'}
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-lg text-slate-900">{campaignClientProfile?.name}</h3>
+                    <p className="text-slate-500">{campaignClientProfile?.location}</p>
+                  </div>
+                </div>
+
+                <h4 className="font-semibold text-slate-800 mb-3">Workflows to Run ({campaignWorkflows.length})</h4>
+                <div className="space-y-2">
+                  {campaignWorkflows.map((workflow, idx) => {
+                    const WIcon = iconMap[workflow.icon] || FileText;
+                    const ready = isWorkflowReady(workflow);
+                    return (
+                      <div key={workflow.id} className={`flex items-center gap-3 p-3 rounded-xl ${ready ? 'bg-green-50' : 'bg-red-50'}`}>
+                        <span className="w-6 h-6 rounded-full bg-slate-800 text-white text-xs flex items-center justify-center font-bold">{idx + 1}</span>
+                        <WIcon className="w-5 h-5" style={{ color: workflow.color }} />
+                        <span className="flex-1 font-medium text-slate-800">{workflow.name}</span>
+                        {ready ? (
+                          <span className="text-xs text-green-600 flex items-center gap-1"><CheckCircle className="w-4 h-4" /> Ready</span>
+                        ) : (
+                          <span className="text-xs text-red-600 flex items-center gap-1"><AlertCircle className="w-4 h-4" /> Missing inputs</span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="flex justify-between pt-4">
+                <button onClick={prevStep} className="px-6 py-3 border border-slate-200 rounded-xl text-slate-600 hover:bg-slate-50 font-medium">
+                  Back to Configure
+                </button>
+                <button
+                  onClick={runCampaignWithInputs}
+                  disabled={!hasApiKey || !allWorkflowsReady()}
+                  className="px-10 py-4 bg-gradient-to-r from-green-500 to-emerald-600 text-white rounded-xl font-bold hover:from-green-600 hover:to-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-green-200 flex items-center gap-2 text-lg"
+                >
+                  <Play className="w-6 h-6" /> Launch Campaign
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Step 5: Results */}
+          {campaignStep === 5 && (
+            <div className="space-y-6">
+              <div className="flex items-center justify-between">
+                <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-3">
+                  {isComplete ? <CheckCircle className="w-8 h-8 text-green-500" /> : <Loader2 className="w-8 h-8 text-indigo-500 animate-spin" />}
+                  {isComplete ? 'Campaign Complete!' : 'Running Campaign...'}
+                </h1>
+                {isComplete && (
+                  <div className="flex gap-2">
+                    <button onClick={exportCampaignAsZip} className="px-4 py-2 bg-indigo-600 text-white rounded-lg font-medium flex items-center gap-2 hover:bg-indigo-700">
+                      <Download className="w-4 h-4" /> Export All
+                    </button>
+                    <button onClick={resetCampaign} className="px-4 py-2 border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 font-medium flex items-center gap-2">
+                      <RefreshCw className="w-4 h-4" /> New Campaign
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Progress */}
+              {isRunning && (
+                <div className="bg-white rounded-xl p-4 border border-slate-200">
+                  <div className="flex justify-between text-sm text-slate-600 mb-2">
+                    <span>Processing workflow {campaignProgress.current} of {campaignProgress.total}</span>
+                    <span>{Math.round((campaignProgress.current / campaignProgress.total) * 100)}%</span>
+                  </div>
+                  <div className="h-3 bg-slate-100 rounded-full overflow-hidden">
+                    <div className="h-full bg-gradient-to-r from-indigo-500 to-purple-500 transition-all duration-500" style={{ width: `${(campaignProgress.current / campaignProgress.total) * 100}%` }} />
                   </div>
                 </div>
               )}
 
-              {/* Run Campaign Button */}
-              <div className="flex justify-center">
-                <button
-                  onClick={runCampaign}
-                  disabled={!hasApiKey || campaignWorkflows.length === 0}
-                  className="flex items-center gap-2 px-6 py-3 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed font-semibold"
-                >
-                  <Play className="w-5 h-5" />
-                  Run Campaign ({campaignWorkflows.length} workflows)
-                </button>
+              {/* Results */}
+              <div className="space-y-4">
+                {campaignResults.map((result, idx) => (
+                  <div key={idx} className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
+                    <div className="px-5 py-4 flex items-center justify-between border-b border-slate-100">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ backgroundColor: (result.workflowColor || '#6366f1') + '15' }}>
+                          {result.error ? <AlertCircle className="w-5 h-5 text-red-500" /> : <CheckCircle className="w-5 h-5" style={{ color: result.workflowColor }} />}
+                        </div>
+                        <div>
+                          <h3 className="font-semibold text-slate-900">{result.workflowName}</h3>
+                          {result.error && <p className="text-sm text-red-500">Error: {result.error}</p>}
+                        </div>
+                      </div>
+                      {!result.error && (
+                        <button
+                          onClick={() => copyToClipboard(result.rawContent, `campaign-${idx}`)}
+                          className="px-3 py-1.5 text-sm bg-slate-100 hover:bg-slate-200 rounded-lg flex items-center gap-1"
+                        >
+                          {copiedId === `campaign-${idx}` ? <Check className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}
+                          {copiedId === `campaign-${idx}` ? 'Copied!' : 'Copy'}
+                        </button>
+                      )}
+                    </div>
+                    {!result.error && (
+                      <div className="p-5 max-h-80 overflow-y-auto">
+                        {(result.outputSections || []).map(section => {
+                          const content = result.outputs?.[section.id];
+                          if (!content) return null;
+                          return (
+                            <div key={section.id} className="mb-4 last:mb-0">
+                              <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">{section.label}</h4>
+                              <div className="text-sm text-slate-700 bg-slate-50 rounded-lg p-3">{content.substring(0, 600)}{content.length > 600 ? '...' : ''}</div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                ))}
               </div>
-            </>
+            </div>
           )}
         </main>
       </div>
@@ -1539,16 +1856,21 @@ export default function App() {
   // Render History Page
   const renderHistory = () => {
     return (
-      <div className="min-h-screen bg-slate-50">
-        <header className="bg-white border-b border-slate-200 sticky top-0 z-50">
-          <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between">
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-indigo-50/30">
+        {/* Professional History Header */}
+        <header className="bg-white/80 backdrop-blur-md border-b border-slate-200/60 sticky top-0 z-50 shadow-sm">
+          <div className="max-w-4xl mx-auto px-4 h-14 flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <button onClick={() => setCurrentView('dashboard')} className="p-2 hover:bg-slate-100 rounded-lg">
+              <button onClick={() => setCurrentView('dashboard')} className="p-2.5 hover:bg-slate-100 rounded-xl transition-colors">
                 <ArrowLeft className="w-5 h-5 text-slate-500" />
               </button>
-              <Clock className="w-5 h-5 text-slate-600" />
-              <h1 className="font-semibold text-slate-900">Generation History</h1>
-              <span className="text-sm text-slate-500">({artifacts.length} saved)</span>
+              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-500 to-cyan-600 flex items-center justify-center">
+                <Clock className="w-5 h-5 text-white" />
+              </div>
+              <div>
+                <h1 className="font-bold text-slate-900">Generation History</h1>
+                <p className="text-[10px] text-slate-400 -mt-0.5">{artifacts.length} saved generation{artifacts.length !== 1 ? 's' : ''}</p>
+              </div>
             </div>
             {artifacts.length > 0 && (
               <button
@@ -1557,7 +1879,7 @@ export default function App() {
                     clearAllArtifacts();
                   }
                 }}
-                className="text-sm text-red-600 hover:text-red-700 px-3 py-1.5 hover:bg-red-50 rounded-lg"
+                className="text-sm text-red-600 hover:text-red-700 px-4 py-2 hover:bg-red-50 rounded-xl font-medium transition-colors"
               >
                 Clear All
               </button>
@@ -1568,19 +1890,19 @@ export default function App() {
         <main className="max-w-4xl mx-auto px-4 py-6">
           {/* History Search */}
           {artifacts.length > 0 && (
-            <div className="relative mb-4">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+            <div className="relative mb-6">
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
               <input
                 type="text"
                 placeholder="Search by workflow, client, or category..."
                 value={historySearch}
                 onChange={(e) => setHistorySearch(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full pl-11 pr-4 py-3 bg-white border border-slate-200/60 rounded-2xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-300 shadow-sm transition-all hover:shadow-md"
               />
               {historySearch && (
                 <button
                   onClick={() => setHistorySearch('')}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                  className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
                 >
                   <X className="w-4 h-4" />
                 </button>
@@ -1589,43 +1911,47 @@ export default function App() {
           )}
 
           {artifacts.length === 0 ? (
-            <div className="text-center py-12">
-              <Clock className="w-12 h-12 text-slate-300 mx-auto mb-4" />
-              <h3 className="text-lg font-medium text-slate-900 mb-2">No saved generations yet</h3>
-              <p className="text-slate-500 mb-4">Run a workflow to generate content. Results are automatically saved here.</p>
+            <div className="text-center py-16">
+              <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-blue-100 to-cyan-100 flex items-center justify-center mx-auto mb-6">
+                <Clock className="w-10 h-10 text-blue-400" />
+              </div>
+              <h3 className="text-xl font-bold text-slate-900 mb-2">No saved generations yet</h3>
+              <p className="text-slate-500 mb-6 max-w-md mx-auto">Run a workflow to generate content. Results are automatically saved here for future reference.</p>
               <button
                 onClick={() => setCurrentView('dashboard')}
-                className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                className="inline-flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-xl hover:from-indigo-700 hover:to-purple-700 font-semibold shadow-lg shadow-indigo-200/50 transition-all hover:shadow-xl"
               >
-                <Sparkles className="w-4 h-4" />
+                <Sparkles className="w-5 h-5" />
                 Browse Workflows
               </button>
             </div>
           ) : filteredArtifacts.length === 0 ? (
-            <div className="text-center py-8 text-slate-500">
-              <Search className="w-8 h-8 mx-auto mb-2 text-slate-300" />
-              <p>No results match "{historySearch}"</p>
-              <button onClick={() => setHistorySearch('')} className="text-blue-600 text-sm mt-2">Clear search</button>
+            <div className="text-center py-12 text-slate-500">
+              <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mx-auto mb-4">
+                <Search className="w-8 h-8 text-slate-300" />
+              </div>
+              <p className="font-medium text-slate-700">No results match "{historySearch}"</p>
+              <button onClick={() => setHistorySearch('')} className="text-indigo-600 text-sm mt-3 font-medium hover:text-indigo-700">Clear search</button>
             </div>
           ) : (
-            <div className="space-y-3">
+            <div className="space-y-4">
               {filteredArtifacts.map(artifact => {
                 const Icon = iconMap[categories[artifact.workflowCategory]?.icon] || FileText;
                 return (
                   <div
                     key={artifact.id}
-                    className="bg-white rounded-lg border border-slate-200 hover:border-blue-300 hover:shadow-sm transition-all"
+                    className="bg-white rounded-2xl border border-slate-200/60 hover:border-indigo-300 hover:shadow-lg hover:shadow-indigo-100/50 transition-all shadow-sm"
                   >
-                    <div className="p-4">
+                    <div className="p-5">
                       <div className="flex items-start justify-between gap-4">
-                        <div className="flex items-start gap-3 flex-1 min-w-0">
-                          <div className="p-2 bg-slate-100 rounded-lg flex-shrink-0">
-                            <Icon className="w-4 h-4 text-slate-600" />
+                        <div className="flex items-start gap-4 flex-1 min-w-0">
+                          <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center flex-shrink-0">
+                            <Icon className="w-5 h-5 text-white" />
                           </div>
                           <div className="flex-1 min-w-0">
-                            <h3 className="font-medium text-slate-900 truncate">{artifact.workflowName}</h3>
-                            <div className="flex items-center gap-2 mt-1 text-xs text-slate-500">
-                              <span>{formatRelativeTime(artifact.timestamp)}</span>
+                            <h3 className="font-semibold text-slate-900 truncate">{artifact.workflowName}</h3>
+                            <div className="flex items-center gap-2 mt-1.5 text-xs text-slate-500">
+                              <span className="px-2 py-0.5 bg-slate-100 rounded-full">{formatRelativeTime(artifact.timestamp)}</span>
                               <span>•</span>
                               <span>{MODEL_PROVIDERS[artifact.provider]?.icon} {(artifact.model || 'Unknown').split('-').slice(0, 2).join(' ')}</span>
                             </div>
@@ -1639,13 +1965,13 @@ export default function App() {
                         <div className="flex items-center gap-2 flex-shrink-0">
                           <button
                             onClick={() => viewArtifact(artifact)}
-                            className="px-3 py-1.5 text-sm bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100"
+                            className="px-4 py-2 text-sm bg-gradient-to-r from-indigo-50 to-purple-50 text-indigo-700 rounded-xl hover:from-indigo-100 hover:to-purple-100 font-medium transition-colors"
                           >
                             View
                           </button>
                           <button
                             onClick={() => deleteArtifact(artifact.id)}
-                            className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg"
+                            className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-colors"
                           >
                             <X className="w-4 h-4" />
                           </button>
@@ -1776,28 +2102,39 @@ export default function App() {
     const currentProvider = MODEL_PROVIDERS[settings.provider];
 
     return (
-      <div className="min-h-screen bg-slate-50">
-        <header className="bg-white border-b border-slate-200 sticky top-0 z-50">
-          <div className="max-w-3xl mx-auto px-4 py-3 flex items-center gap-3">
-            <button onClick={() => setCurrentView('dashboard')} className="p-2 hover:bg-slate-100 rounded-lg">
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-indigo-50/30">
+        {/* Professional Settings Header */}
+        <header className="bg-white/80 backdrop-blur-md border-b border-slate-200/60 sticky top-0 z-50 shadow-sm">
+          <div className="max-w-3xl mx-auto px-4 h-14 flex items-center gap-3">
+            <button onClick={() => setCurrentView('dashboard')} className="p-2.5 hover:bg-slate-100 rounded-xl transition-colors">
               <ArrowLeft className="w-5 h-5 text-slate-500" />
             </button>
-            <Settings className="w-5 h-5 text-slate-600" />
-            <h1 className="font-semibold text-slate-900">Settings</h1>
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-slate-600 to-slate-800 flex items-center justify-center">
+              <Settings className="w-5 h-5 text-white" />
+            </div>
+            <div>
+              <h1 className="font-bold text-slate-900">Settings</h1>
+              <p className="text-[10px] text-slate-400 -mt-0.5">Configure AI models & law firm profiles</p>
+            </div>
           </div>
         </header>
 
-        <main className="max-w-3xl mx-auto px-4 py-6 space-y-4">
+        <main className="max-w-3xl mx-auto px-4 py-6 space-y-6">
           {/* Model Provider Selection */}
-          <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-            <div className="px-4 py-3 bg-blue-50 border-b border-slate-100 flex items-center gap-2">
-              <Key className="w-4 h-4 text-blue-600" />
-              <span className="font-medium text-slate-900 text-sm">AI Model Configuration</span>
-            </div>
-            <div className="p-4 space-y-4">
+          <div className="bg-white rounded-2xl border border-slate-200/60 overflow-hidden shadow-sm">
+            <div className="px-5 py-4 bg-gradient-to-r from-blue-50 to-indigo-50 border-b border-slate-100 flex items-center gap-3">
+              <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center">
+                <Key className="w-4 h-4 text-white" />
+              </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2">Model Provider</label>
-                <div className="grid grid-cols-3 gap-2">
+                <span className="font-semibold text-slate-900">AI Model Configuration</span>
+                <p className="text-xs text-slate-500">Select your preferred AI provider and model</p>
+              </div>
+            </div>
+            <div className="p-5 space-y-5">
+              <div>
+                <label className="block text-sm font-semibold text-slate-700 mb-3">Model Provider</label>
+                <div className="grid grid-cols-3 gap-3">
                   {Object.entries(MODEL_PROVIDERS).map(([key, provider]) => (
                     <button
                       key={key}
@@ -1808,14 +2145,15 @@ export default function App() {
                           model: provider.models[0].id
                         });
                       }}
-                      className={`p-3 rounded-lg border-2 text-left transition-all ${
+                      className={`p-4 rounded-2xl border-2 text-left transition-all hover:shadow-md ${
                         settings.provider === key
-                          ? 'border-blue-500 bg-blue-50'
-                          : 'border-slate-200 hover:border-slate-300'
+                          ? 'border-indigo-500 bg-gradient-to-br from-indigo-50 to-purple-50 shadow-md shadow-indigo-100'
+                          : 'border-slate-200 hover:border-slate-300 bg-white'
                       }`}
                     >
-                      <div className="text-lg mb-1">{provider.icon}</div>
-                      <div className="text-sm font-medium text-slate-900">{provider.name.split(' ')[0]}</div>
+                      <div className="text-2xl mb-2">{provider.icon}</div>
+                      <div className="text-sm font-bold text-slate-900">{provider.name.split(' ')[0]}</div>
+                      <div className="text-[10px] text-slate-400 mt-0.5">{provider.models.length} models</div>
                     </button>
                   ))}
                 </div>
@@ -1920,46 +2258,57 @@ export default function App() {
           </div>
 
           {/* Law Firm Profiles */}
-          <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-            <div className="px-4 py-3 bg-purple-50 border-b border-slate-100 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Database className="w-4 h-4 text-purple-600" />
-                <span className="font-medium text-slate-900 text-sm">Law Firm Profiles</span>
-                <span className="text-xs text-slate-500">({clientProfiles.length} saved)</span>
+          <div className="bg-white rounded-2xl border border-slate-200/60 overflow-hidden shadow-sm">
+            <div className="px-5 py-4 bg-gradient-to-r from-purple-50 to-pink-50 border-b border-slate-100 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-purple-500 to-pink-600 flex items-center justify-center">
+                  <Database className="w-4 h-4 text-white" />
+                </div>
+                <div>
+                  <span className="font-semibold text-slate-900">Law Firm Profiles</span>
+                  <span className="text-xs text-slate-500 ml-2">({clientProfiles.length} saved)</span>
+                </div>
               </div>
               <button
                 onClick={() => {
                   setNewClientProfile({ name: '', practiceAreas: [], location: '', tone: 'professional', competitors: '', website: '', uniqueValue: '' });
                   setShowClientProfileModal(true);
                 }}
-                className="text-xs px-2 py-1 bg-purple-600 text-white rounded hover:bg-purple-700 flex items-center gap-1"
+                className="px-4 py-2 bg-gradient-to-r from-purple-600 to-pink-600 text-white rounded-xl hover:from-purple-700 hover:to-pink-700 flex items-center gap-2 text-sm font-semibold shadow-lg shadow-purple-200/50 transition-all hover:shadow-xl"
               >
                 <span>+ Add Firm</span>
               </button>
             </div>
-            <div className="p-4">
+            <div className="p-5">
               {clientProfiles.length === 0 ? (
-                <div className="text-center py-6 text-slate-500">
-                  <Database className="w-8 h-8 mx-auto mb-2 text-slate-300" />
-                  <p className="text-sm">No law firm profiles yet</p>
-                  <p className="text-xs text-slate-400 mt-1">Add profiles to auto-fill workflows and campaigns</p>
+                <div className="text-center py-8 text-slate-500">
+                  <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-purple-100 to-pink-100 flex items-center justify-center mx-auto mb-4">
+                    <Database className="w-8 h-8 text-purple-400" />
+                  </div>
+                  <p className="font-medium text-slate-700">No law firm profiles yet</p>
+                  <p className="text-sm text-slate-400 mt-1">Add profiles to auto-fill workflows and campaigns</p>
                 </div>
               ) : (
-                <div className="space-y-2">
+                <div className="space-y-3">
                   {clientProfiles.map(profile => (
                     <div
                       key={profile.id}
-                      className="flex items-center justify-between p-3 bg-slate-50 rounded-lg border border-slate-200"
+                      className="flex items-center justify-between p-4 bg-gradient-to-r from-slate-50 to-white rounded-xl border border-slate-200/60 hover:shadow-md transition-all"
                     >
-                      <div className="flex-1 min-w-0">
-                        <div className="font-medium text-slate-900">{profile.name}</div>
-                        <div className="text-xs text-slate-500 truncate">
-                          {profile.location || 'No location'} • {profile.practiceAreas?.length || 0} practice areas
+                      <div className="flex items-center gap-3 flex-1 min-w-0">
+                        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-500 to-pink-600 flex items-center justify-center text-white font-bold">
+                          {profile.name.charAt(0)}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="font-semibold text-slate-900">{profile.name}</div>
+                          <div className="text-xs text-slate-500 truncate">
+                            {profile.location || 'No location'} • {profile.practiceAreas?.length || 0} practice areas
+                          </div>
                         </div>
                       </div>
                       <button
                         onClick={() => deleteClientProfile(profile.id)}
-                        className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded"
+                        className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-colors"
                       >
                         <X className="w-4 h-4" />
                       </button>
@@ -1971,26 +2320,30 @@ export default function App() {
           </div>
 
           {/* Quick Default (Legacy Support) */}
-          <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-            <div className="px-4 py-3 bg-slate-50 border-b border-slate-100 flex items-center gap-2">
-              <Settings className="w-4 h-4 text-slate-500" />
-              <span className="font-medium text-slate-900 text-sm">Quick Defaults</span>
-              <span className="text-xs text-slate-400">(Used when no profile selected)</span>
+          <div className="bg-white rounded-2xl border border-slate-200/60 overflow-hidden shadow-sm">
+            <div className="px-5 py-4 bg-gradient-to-r from-slate-50 to-slate-100 border-b border-slate-100 flex items-center gap-3">
+              <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-slate-500 to-slate-700 flex items-center justify-center">
+                <Settings className="w-4 h-4 text-white" />
+              </div>
+              <div>
+                <span className="font-semibold text-slate-900">Quick Defaults</span>
+                <p className="text-xs text-slate-500">Used when no profile selected</p>
+              </div>
             </div>
-            <div className="p-4 space-y-3">
+            <div className="p-5 space-y-4">
               <input
                 type="text"
                 value={settings.defaultClientName}
                 onChange={(e) => setSettings({ ...settings, defaultClientName: e.target.value })}
                 placeholder="Default Firm Name"
-                className="input text-sm"
+                className="w-full px-4 py-3 bg-white border border-slate-200/60 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-300"
               />
               <input
                 type="text"
                 value={settings.defaultLocation}
                 onChange={(e) => setSettings({ ...settings, defaultLocation: e.target.value })}
                 placeholder="Default Location (e.g., Phoenix, Arizona)"
-                className="input text-sm"
+                className="w-full px-4 py-3 bg-white border border-slate-200/60 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-300"
               />
             </div>
           </div>
@@ -2016,92 +2369,111 @@ export default function App() {
     const currentProvider = MODEL_PROVIDERS[settings.provider];
 
     return (
-      <div className="min-h-screen bg-slate-50">
-        <header className="bg-white border-b border-slate-200 sticky top-0 z-50">
-          <div className="max-w-6xl mx-auto px-4 h-12 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Sparkles className="w-5 h-5 text-blue-600" />
-              <span className="font-bold text-slate-900">Attorney Sync AI</span>
-              <span className="text-xs text-slate-400 hidden sm:inline">| {totalWorkflows} Workflows</span>
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-indigo-50/30">
+        {/* Professional Header with Gradient */}
+        <header className="bg-white/80 backdrop-blur-md border-b border-slate-200/60 sticky top-0 z-50 shadow-sm">
+          <div className="max-w-6xl mx-auto px-4 h-14 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 via-purple-500 to-blue-600 flex items-center justify-center shadow-lg shadow-indigo-200/50">
+                <Sparkles className="w-5 h-5 text-white" />
+              </div>
+              <div className="flex flex-col">
+                <span className="font-bold text-slate-900 text-sm tracking-tight">Attorney Sync AI</span>
+                <span className="text-[10px] text-slate-400 -mt-0.5">{totalWorkflows} Marketing Workflows</span>
+              </div>
             </div>
             <div className="flex items-center gap-2">
               {hasApiKey && (
-                <span className="text-xs px-2 py-1 bg-slate-100 rounded text-slate-600">
+                <span className="text-xs px-3 py-1.5 bg-gradient-to-r from-slate-50 to-slate-100 rounded-full text-slate-600 font-medium border border-slate-200/60">
                   {currentProvider.icon} {(settings.model || 'Unknown').split('-').slice(0, 2).join(' ')}
                 </span>
               )}
               <button
                 onClick={() => setCurrentView('campaign')}
-                className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white text-xs rounded-lg hover:bg-indigo-700"
+                className="hidden sm:flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-indigo-600 to-purple-600 text-white text-xs rounded-xl hover:from-indigo-700 hover:to-purple-700 font-semibold shadow-lg shadow-indigo-200/50 transition-all hover:shadow-xl hover:shadow-indigo-300/50"
                 title="Campaign Builder"
               >
-                <Package className="w-3.5 h-3.5" />
+                <Package className="w-4 h-4" />
                 Campaign
               </button>
-              <button onClick={() => setCurrentView('history')} className="p-2 hover:bg-slate-100 rounded-lg relative">
+              <button onClick={() => setCurrentView('history')} className="p-2.5 hover:bg-slate-100 rounded-xl relative transition-colors">
                 <Clock className="w-4 h-4 text-slate-500" />
                 {artifacts.length > 0 && (
-                  <span className="absolute -top-1 -right-1 w-4 h-4 bg-blue-500 text-white text-[10px] rounded-full flex items-center justify-center">
+                  <span className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-gradient-to-br from-blue-500 to-indigo-600 text-white text-[9px] font-bold rounded-full flex items-center justify-center shadow-sm">
                     {artifacts.length > 9 ? '9+' : artifacts.length}
                   </span>
                 )}
               </button>
-              <button onClick={() => setCurrentView('settings')} className="p-2 hover:bg-slate-100 rounded-lg">
+              <button onClick={() => setCurrentView('settings')} className="p-2.5 hover:bg-slate-100 rounded-xl transition-colors">
                 <Settings className="w-4 h-4 text-slate-500" />
               </button>
             </div>
           </div>
         </header>
 
-        <main className="max-w-6xl mx-auto px-4 py-4">
+        <main className="max-w-6xl mx-auto px-4 py-6">
           {!hasApiKey && (
-            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4 flex items-center gap-3 text-sm">
-              <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0" />
-              <span className="text-amber-800">
+            <div className="bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200/60 rounded-2xl p-4 mb-6 flex items-center gap-4 text-sm shadow-sm">
+              <div className="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center">
+                <AlertCircle className="w-5 h-5 text-amber-600" />
+              </div>
+              <span className="text-amber-800 flex-1">
                 Configure your API key in{' '}
-                <button onClick={() => setCurrentView('settings')} className="underline font-medium">Settings</button>
+                <button onClick={() => setCurrentView('settings')} className="underline font-semibold hover:text-amber-900">Settings</button>
+                {' '}to start generating content
               </span>
             </div>
           )}
 
-          {/* Hero with Campaign Builder CTA */}
-          <div className="bg-gradient-to-r from-blue-600 to-indigo-700 rounded-xl p-5 mb-4 text-white">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div>
-                <h2 className="text-xl font-bold">AI-Powered Legal Marketing</h2>
-                <p className="text-blue-100 text-sm mt-1">{totalWorkflows} workflows for content, ads & operations</p>
+          {/* Hero Section with Enhanced Visual Design */}
+          <div className="relative overflow-hidden bg-gradient-to-br from-indigo-600 via-purple-600 to-blue-700 rounded-3xl p-6 md:p-8 mb-6 text-white shadow-2xl shadow-indigo-300/30">
+            {/* Decorative Elements */}
+            <div className="absolute top-0 right-0 w-64 h-64 bg-white/10 rounded-full -translate-y-1/2 translate-x-1/2 blur-3xl" />
+            <div className="absolute bottom-0 left-0 w-48 h-48 bg-purple-400/20 rounded-full translate-y-1/2 -translate-x-1/2 blur-2xl" />
+
+            <div className="relative flex flex-col md:flex-row md:items-center justify-between gap-6">
+              <div className="flex-1">
+                <div className="inline-flex items-center gap-2 px-3 py-1 bg-white/10 rounded-full text-xs font-medium text-white/90 mb-3 backdrop-blur-sm">
+                  <Sparkles className="w-3 h-3" />
+                  AI-Powered Platform
+                </div>
+                <h2 className="text-2xl md:text-3xl font-bold tracking-tight">Legal Marketing Automation</h2>
+                <p className="text-indigo-100 mt-2 max-w-md">{totalWorkflows} professional workflows for content creation, advertising campaigns, and business operations</p>
               </div>
-              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+              <div className="flex flex-col items-start md:items-end gap-4">
                 <button
                   onClick={() => setCurrentView('campaign')}
                   disabled={!hasApiKey}
-                  className="flex items-center gap-2 px-5 py-3 bg-white text-indigo-700 rounded-xl hover:bg-blue-50 disabled:opacity-50 disabled:cursor-not-allowed font-bold text-sm transition-colors shadow-lg"
+                  className="group flex items-center gap-3 px-6 py-4 bg-white text-indigo-700 rounded-2xl hover:bg-indigo-50 disabled:opacity-50 disabled:cursor-not-allowed font-bold transition-all shadow-xl hover:shadow-2xl hover:scale-[1.02]"
                 >
-                  <Package className="w-5 h-5" />
-                  Campaign Builder
+                  <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center group-hover:scale-110 transition-transform">
+                    <Package className="w-5 h-5 text-white" />
+                  </div>
+                  <div className="text-left">
+                    <div className="text-base">Campaign Builder</div>
+                    <div className="text-xs font-normal text-indigo-500">Run multiple workflows at once</div>
+                  </div>
+                  <ChevronRight className="w-5 h-5 text-indigo-400 group-hover:translate-x-1 transition-transform" />
                 </button>
-                <div className="text-xs text-blue-200 max-w-[200px]">
-                  Chain multiple workflows together and run them all at once for a complete campaign
-                </div>
               </div>
             </div>
           </div>
 
-          {/* Search and Quick Actions */}
-          <div className="flex flex-col sm:flex-row gap-3 mb-4">
+          {/* Search Bar with Enhanced Styling */}
+          <div className="flex flex-col sm:flex-row gap-4 mb-6">
             <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
               <input
                 type="text"
-                placeholder="Search workflows..."
+                placeholder="Search workflows by name, category, or feature..."
                 value={workflowSearch}
                 onChange={(e) => setWorkflowSearch(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full pl-11 pr-4 py-3 bg-white border border-slate-200/60 rounded-2xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-300 shadow-sm transition-all hover:shadow-md"
               />
               {workflowSearch && (
                 <button
                   onClick={() => setWorkflowSearch('')}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                  className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
                 >
                   <X className="w-4 h-4" />
                 </button>
@@ -2109,9 +2481,9 @@ export default function App() {
             </div>
             {clientProfiles.length > 0 && (
               <div className="flex items-center gap-2 text-sm">
-                <span className="text-slate-500">Quick:</span>
+                <span className="text-slate-500 font-medium">Law Firms:</span>
                 {clientProfiles.slice(0, 3).map(profile => (
-                  <span key={profile.id} className="px-2 py-1 bg-blue-50 text-blue-700 rounded text-xs">
+                  <span key={profile.id} className="px-3 py-1.5 bg-gradient-to-r from-blue-50 to-indigo-50 text-indigo-700 rounded-lg text-xs font-medium border border-indigo-100/60">
                     {profile.name}
                   </span>
                 ))}
@@ -2133,15 +2505,19 @@ export default function App() {
               const category = categories[categoryId];
               const Icon = iconMap[category.icon] || FileText;
               return (
-                <div key={categoryId}>
-                  <div className="flex items-center gap-2 mb-3">
-                    <Icon className="w-4 h-4" style={{ color: category.color }} />
-                    <span className="text-sm font-semibold text-slate-700">{category.name}</span>
-                    <span className="text-xs text-slate-400">({categoryWorkflows.length})</span>
+                <div key={categoryId} className="bg-white/50 backdrop-blur-sm rounded-2xl p-5 border border-slate-200/60">
+                  <div className="flex items-center gap-3 mb-4">
+                    <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ backgroundColor: category.color + '15' }}>
+                      <Icon className="w-4 h-4" style={{ color: category.color }} />
+                    </div>
+                    <div>
+                      <span className="text-sm font-bold text-slate-800">{category.name}</span>
+                      <span className="text-xs text-slate-400 ml-2">({categoryWorkflows.length} workflows)</span>
+                    </div>
                   </div>
 
-                  {/* Workflow Cards with Full Details */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {/* Workflow Cards with Professional Styling */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                     {categoryWorkflows.map(workflow => {
                       const WIcon = iconMap[workflow.icon] || FileText;
                       return (
@@ -2149,33 +2525,32 @@ export default function App() {
                           key={workflow.id}
                           onClick={() => selectWorkflow(workflow)}
                           disabled={!hasApiKey}
-                          className="bg-white rounded-xl p-4 border border-slate-200 hover:border-blue-300 hover:shadow-md transition-all text-left group disabled:opacity-50 disabled:cursor-not-allowed"
+                          className="bg-white rounded-2xl p-4 border border-slate-200/60 hover:border-indigo-300 hover:shadow-lg hover:shadow-indigo-100/50 transition-all text-left group disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                           <div className="flex items-start gap-3">
                             <div
-                              className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0"
+                              className="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0 transition-transform group-hover:scale-110"
                               style={{ backgroundColor: workflow.color + '15' }}
                             >
                               <WIcon className="w-5 h-5" style={{ color: workflow.color }} />
                             </div>
                             <div className="flex-1 min-w-0">
-                              <h3 className="font-semibold text-slate-900 text-sm group-hover:text-blue-700 transition-colors">
+                              <h3 className="font-semibold text-slate-900 text-sm group-hover:text-indigo-700 transition-colors">
                                 {workflow.name}
                               </h3>
-                              <p className="text-xs text-slate-500 mt-1 line-clamp-2">
+                              <p className="text-xs text-slate-500 mt-1.5 line-clamp-2 leading-relaxed">
                                 {workflow.description}
                               </p>
-                              <div className="flex items-center gap-2 mt-2">
-                                <span className="text-xs text-slate-400">
+                              <div className="flex items-center gap-3 mt-3">
+                                <span className="text-[10px] px-2 py-0.5 bg-slate-100 text-slate-500 rounded-full font-medium">
                                   {workflow.inputs.length} inputs
                                 </span>
-                                <span className="text-slate-300">•</span>
-                                <span className="text-xs text-slate-400">
+                                <span className="text-[10px] px-2 py-0.5 bg-slate-100 text-slate-500 rounded-full font-medium">
                                   {(workflow.outputSections || []).length} outputs
                                 </span>
                               </div>
                             </div>
-                            <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-blue-500 flex-shrink-0 mt-1" />
+                            <ChevronRight className="w-5 h-5 text-slate-300 group-hover:text-indigo-500 group-hover:translate-x-1 flex-shrink-0 mt-1 transition-all" />
                           </div>
                         </button>
                       );
@@ -2186,8 +2561,21 @@ export default function App() {
             })}
           </div>
 
-          <footer className="mt-6 pt-4 border-t border-slate-200 text-center">
-            <p className="text-xs text-slate-400">Attorney Sync AI · Powered by {currentProvider.name}</p>
+          {/* Footer with Enhanced Styling */}
+          <footer className="mt-8 pt-6 border-t border-slate-200/60">
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-400">
+              <div className="flex items-center gap-2">
+                <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center">
+                  <Sparkles className="w-3 h-3 text-white" />
+                </div>
+                <span className="font-medium text-slate-600">Attorney Sync AI</span>
+              </div>
+              <div className="flex items-center gap-4">
+                <span>Powered by {currentProvider.name}</span>
+                <span className="w-1 h-1 rounded-full bg-slate-300" />
+                <span>{totalWorkflows} Workflows Available</span>
+              </div>
+            </div>
           </footer>
         </main>
       </div>
@@ -2681,109 +3069,6 @@ export default function App() {
           )}
         </main>
 
-        {/* Client Profile Modal */}
-        {showClientProfileModal && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-xl max-w-md w-full p-6">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="font-semibold text-slate-900">New Client Profile</h3>
-                <button onClick={() => setShowClientProfileModal(false)} className="text-slate-400 hover:text-slate-600">
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-              <div className="space-y-3">
-                <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">Client/Firm Name *</label>
-                  <input
-                    type="text"
-                    value={newClientProfile.name}
-                    onChange={(e) => setNewClientProfile(p => ({ ...p, name: e.target.value }))}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
-                    placeholder="Smith & Associates"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">Location</label>
-                  <input
-                    type="text"
-                    value={newClientProfile.location}
-                    onChange={(e) => setNewClientProfile(p => ({ ...p, location: e.target.value }))}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
-                    placeholder="Los Angeles, California"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">Practice Areas</label>
-                  <input
-                    type="text"
-                    value={newClientProfile.practiceAreas.join(', ')}
-                    onChange={(e) => setNewClientProfile(p => ({ ...p, practiceAreas: e.target.value.split(',').map(s => s.trim()).filter(Boolean) }))}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
-                    placeholder="Personal Injury, Car Accidents"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">Website URL</label>
-                  <input
-                    type="text"
-                    value={newClientProfile.website}
-                    onChange={(e) => setNewClientProfile(p => ({ ...p, website: e.target.value }))}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
-                    placeholder="https://smithlaw.com"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">Tone/Voice</label>
-                  <select
-                    value={newClientProfile.tone}
-                    onChange={(e) => setNewClientProfile(p => ({ ...p, tone: e.target.value }))}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
-                  >
-                    <option value="professional">Professional</option>
-                    <option value="empathetic">Empathetic</option>
-                    <option value="authoritative">Authoritative</option>
-                    <option value="conversational">Conversational</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">Unique Value Proposition</label>
-                  <textarea
-                    value={newClientProfile.uniqueValue}
-                    onChange={(e) => setNewClientProfile(p => ({ ...p, uniqueValue: e.target.value }))}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
-                    rows={2}
-                    placeholder="What makes this firm unique?"
-                  />
-                </div>
-              </div>
-              <div className="flex gap-2 mt-4">
-                <button
-                  onClick={() => setShowClientProfileModal(false)}
-                  className="flex-1 px-4 py-2 border border-slate-200 rounded-lg text-sm"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={() => {
-                    if (newClientProfile.name.trim()) {
-                      const profile = saveClientProfile(newClientProfile);
-                      applyClientProfile(profile);
-                      setShowClientProfileModal(false);
-                      setNewClientProfile({
-                        name: '', practiceAreas: [], location: '', tone: 'professional',
-                        competitors: '', website: '', uniqueValue: ''
-                      });
-                    }
-                  }}
-                  className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700"
-                >
-                  Save & Apply
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
         {/* Save Template Modal */}
         {showSaveTemplateModal && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -2908,11 +3193,124 @@ export default function App() {
     );
   };
 
-  // Main render
-  if (currentView === 'settings') return renderSettings();
-  if (currentView === 'workflow') return renderWorkflowPage();
-  if (currentView === 'history') return renderHistory();
-  if (currentView === 'artifact') return renderArtifactDetail();
-  if (currentView === 'campaign') return renderCampaignBuilder();
-  return renderDashboard();
+  // Main render - wrap with global modals
+  const renderCurrentView = () => {
+    if (currentView === 'settings') return renderSettings();
+    if (currentView === 'workflow') return renderWorkflowPage();
+    if (currentView === 'history') return renderHistory();
+    if (currentView === 'artifact') return renderArtifactDetail();
+    if (currentView === 'campaign') return renderCampaignBuilder();
+    return renderDashboard();
+  };
+
+  return (
+    <>
+      {renderCurrentView()}
+
+      {/* Global Modal: Add Law Firm Profile */}
+      {showClientProfileModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl max-w-md w-full p-6 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-semibold text-slate-900">Add Law Firm Profile</h3>
+              <button onClick={() => setShowClientProfileModal(false)} className="text-slate-400 hover:text-slate-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Law Firm Name *</label>
+                <input
+                  type="text"
+                  value={newClientProfile.name}
+                  onChange={(e) => setNewClientProfile(p => ({ ...p, name: e.target.value }))}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
+                  placeholder="Smith & Associates"
+                  autoFocus
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Target Location *</label>
+                <input
+                  type="text"
+                  value={newClientProfile.location}
+                  onChange={(e) => setNewClientProfile(p => ({ ...p, location: e.target.value }))}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
+                  placeholder="Los Angeles, California"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Practice Areas</label>
+                <input
+                  type="text"
+                  value={newClientProfile.practiceAreas.join(', ')}
+                  onChange={(e) => setNewClientProfile(p => ({ ...p, practiceAreas: e.target.value.split(',').map(s => s.trim()).filter(Boolean) }))}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
+                  placeholder="Personal Injury, Car Accidents, Wrongful Death"
+                />
+                <p className="text-xs text-slate-400 mt-1">Comma-separated list</p>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Website URL</label>
+                <input
+                  type="text"
+                  value={newClientProfile.website}
+                  onChange={(e) => setNewClientProfile(p => ({ ...p, website: e.target.value }))}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
+                  placeholder="https://smithlaw.com"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Brand Voice/Tone</label>
+                <select
+                  value={newClientProfile.tone}
+                  onChange={(e) => setNewClientProfile(p => ({ ...p, tone: e.target.value }))}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white"
+                >
+                  <option value="professional">Professional & Authoritative</option>
+                  <option value="empathetic">Warm & Empathetic</option>
+                  <option value="authoritative">Direct & Confident</option>
+                  <option value="conversational">Friendly & Conversational</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Unique Value Proposition</label>
+                <textarea
+                  value={newClientProfile.uniqueValue}
+                  onChange={(e) => setNewClientProfile(p => ({ ...p, uniqueValue: e.target.value }))}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm"
+                  rows={2}
+                  placeholder="What makes this firm unique? (e.g., 30+ years experience, no fee unless we win)"
+                />
+              </div>
+            </div>
+            <div className="flex gap-2 mt-4">
+              <button
+                onClick={() => setShowClientProfileModal(false)}
+                className="flex-1 px-4 py-2 border border-slate-200 rounded-lg text-sm hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  if (newClientProfile.name.trim()) {
+                    saveClientProfile(newClientProfile);
+                    setShowClientProfileModal(false);
+                    setNewClientProfile({
+                      name: '', practiceAreas: [], location: '', tone: 'professional',
+                      competitors: '', website: '', uniqueValue: ''
+                    });
+                  }
+                }}
+                disabled={!newClientProfile.name.trim()}
+                className="flex-1 px-4 py-2 bg-purple-600 text-white rounded-lg text-sm hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Save Law Firm
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
 }
