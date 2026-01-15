@@ -100,14 +100,24 @@ const WORKFLOW_SUGGESTIONS = {
   'operations': ['content-strategy-brief', 'client-testimonial', 'competitor-analysis']
 };
 
-// Default settings structure
+// Environment variables for default API keys (set in .env file)
+const ENV_API_KEYS = {
+  anthropic: import.meta.env.VITE_ANTHROPIC_API_KEY || '',
+  openai: import.meta.env.VITE_OPENAI_API_KEY || '',
+  google: import.meta.env.VITE_GOOGLE_API_KEY || ''
+};
+
+// Check if any env keys are configured
+const hasEnvKeys = Object.values(ENV_API_KEYS).some(key => key.length > 0);
+
+// Default settings structure (uses env vars as fallback)
 const defaultSettings = {
-  provider: 'anthropic',
-  model: 'claude-sonnet-4-20250514',
+  provider: import.meta.env.VITE_DEFAULT_PROVIDER || 'anthropic',
+  model: import.meta.env.VITE_DEFAULT_MODEL || 'claude-sonnet-4-20250514',
   apiKeys: {
-    anthropic: '',
-    openai: '',
-    google: ''
+    anthropic: ENV_API_KEYS.anthropic,
+    openai: ENV_API_KEYS.openai,
+    google: ENV_API_KEYS.google
   },
   wordpressUrl: '',
   wordpressUsername: '',
@@ -219,6 +229,7 @@ export default function App() {
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
+        // Migrate old single API key format
         if (parsed.anthropicApiKey && !parsed.apiKeys) {
           parsed.apiKeys = {
             anthropic: parsed.anthropicApiKey,
@@ -227,7 +238,13 @@ export default function App() {
           };
           delete parsed.anthropicApiKey;
         }
-        setSettings({ ...defaultSettings, ...parsed });
+        // Merge with defaults, using env vars as fallback for empty keys
+        const mergedApiKeys = {
+          anthropic: parsed.apiKeys?.anthropic || ENV_API_KEYS.anthropic,
+          openai: parsed.apiKeys?.openai || ENV_API_KEYS.openai,
+          google: parsed.apiKeys?.google || ENV_API_KEYS.google
+        };
+        setSettings({ ...defaultSettings, ...parsed, apiKeys: mergedApiKeys });
       } catch (e) {
         console.error('Failed to load settings:', e);
       }
@@ -1225,6 +1242,11 @@ export default function App() {
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-2">
                   {currentProvider.name} API Key <span className="text-red-500">*</span>
+                  {ENV_API_KEYS[settings.provider] && (
+                    <span className="ml-2 text-xs text-green-600 font-normal">
+                      (Default configured)
+                    </span>
+                  )}
                 </label>
                 <input
                   type="password"
@@ -1233,12 +1255,18 @@ export default function App() {
                     ...settings,
                     apiKeys: { ...settings.apiKeys, [settings.provider]: e.target.value }
                   })}
-                  placeholder={currentProvider.apiKeyPlaceholder}
+                  placeholder={ENV_API_KEYS[settings.provider] ? '••••••••••••••••' : currentProvider.apiKeyPlaceholder}
                   className="input font-mono text-sm"
                 />
-                <p className="text-xs text-slate-500 mt-1">
-                  Get your API key from {currentProvider.apiKeyHelp}
-                </p>
+                {ENV_API_KEYS[settings.provider] ? (
+                  <p className="text-xs text-green-600 mt-1">
+                    Using pre-configured API key. Override by entering a new key above.
+                  </p>
+                ) : (
+                  <p className="text-xs text-slate-500 mt-1">
+                    Get your API key from {currentProvider.apiKeyHelp}
+                  </p>
+                )}
               </div>
             </div>
           </div>
