@@ -220,8 +220,8 @@ export default function App() {
     setFormData(prev => ({ ...prev, [inputId]: value }));
   };
 
-  // API call based on provider
-  const callAPI = async (systemPrompt, userMessage) => {
+  // Streaming API call based on provider
+  const callAPIStreaming = async (systemPrompt, userMessage, onChunk) => {
     const apiKey = getCurrentApiKey();
     const modelConfig = getModelConfig(settings.provider, settings.model);
     const maxTokens = modelConfig.maxOutput;
@@ -231,6 +231,8 @@ export default function App() {
     if (totalInputTokens > modelConfig.contextLimit * 0.8) {
       throw new Error(`Input too large for ${settings.model}. Estimated ${totalInputTokens.toLocaleString()} tokens, limit is ${modelConfig.contextLimit.toLocaleString()}. Try a model with higher context limit.`);
     }
+
+    let fullContent = '';
 
     if (settings.provider === 'anthropic') {
       const response = await fetch('https://api.anthropic.com/v1/messages', {
@@ -244,16 +246,43 @@ export default function App() {
         body: JSON.stringify({
           model: settings.model,
           max_tokens: maxTokens,
+          stream: true,
           system: systemPrompt,
           messages: [{ role: 'user', content: userMessage }]
         })
       });
+
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
         throw new Error(errorData.error?.message || `API Error: ${response.status}`);
       }
-      const data = await response.json();
-      return data.content[0].text;
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value, { stream: true });
+        const lines = chunk.split('\n');
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6);
+            if (data === '[DONE]') continue;
+            try {
+              const parsed = JSON.parse(data);
+              if (parsed.type === 'content_block_delta' && parsed.delta?.text) {
+                fullContent += parsed.delta.text;
+                onChunk(fullContent);
+              }
+            } catch (e) {
+              // Ignore parse errors for incomplete chunks
+            }
+          }
+        }
+      }
     }
 
     else if (settings.provider === 'openai') {
@@ -266,39 +295,99 @@ export default function App() {
         body: JSON.stringify({
           model: settings.model,
           max_tokens: maxTokens,
+          stream: true,
           messages: [
             { role: 'system', content: systemPrompt },
             { role: 'user', content: userMessage }
           ]
         })
       });
+
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
         throw new Error(errorData.error?.message || `API Error: ${response.status}`);
       }
-      const data = await response.json();
-      return data.choices[0].message.content;
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value, { stream: true });
+        const lines = chunk.split('\n');
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6);
+            if (data === '[DONE]') continue;
+            try {
+              const parsed = JSON.parse(data);
+              const content = parsed.choices?.[0]?.delta?.content;
+              if (content) {
+                fullContent += content;
+                onChunk(fullContent);
+              }
+            } catch (e) {
+              // Ignore parse errors for incomplete chunks
+            }
+          }
+        }
+      }
     }
 
     else if (settings.provider === 'google') {
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${settings.model}:generateContent?key=${apiKey}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: `${systemPrompt}\n\n${userMessage}` }] }],
-          generationConfig: { maxOutputTokens: maxTokens }
-        })
-      });
+      // Google uses streamGenerateContent with alt=sse
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${settings.model}:streamGenerateContent?alt=sse&key=${apiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: `${systemPrompt}\n\n${userMessage}` }] }],
+            generationConfig: { maxOutputTokens: maxTokens }
+          })
+        }
+      );
+
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
         throw new Error(errorData.error?.message || `API Error: ${response.status}`);
       }
-      const data = await response.json();
-      return data.candidates[0].content.parts[0].text;
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value, { stream: true });
+        const lines = chunk.split('\n');
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6);
+            try {
+              const parsed = JSON.parse(data);
+              const text = parsed.candidates?.[0]?.content?.parts?.[0]?.text;
+              if (text) {
+                fullContent += text;
+                onChunk(fullContent);
+              }
+            } catch (e) {
+              // Ignore parse errors for incomplete chunks
+            }
+          }
+        }
+      }
     }
+
+    return fullContent;
   };
 
-  // Handle form submission
+  // Handle form submission with streaming
   const handleSubmit = async (e) => {
     e.preventDefault();
     const apiKey = getCurrentApiKey();
@@ -315,7 +404,20 @@ export default function App() {
 
     try {
       const userMessage = buildUserMessage(selectedWorkflow, formData);
-      const content = await callAPI(selectedWorkflow.systemPrompt, userMessage);
+
+      // Stream the response, updating rawOutput as chunks arrive
+      const content = await callAPIStreaming(
+        selectedWorkflow.systemPrompt,
+        userMessage,
+        (partialContent) => {
+          setRawOutput(partialContent);
+          // Parse progressively to show sections as they complete
+          const parsed = parseXMLOutput(partialContent, selectedWorkflow.outputSections);
+          setOutput(parsed);
+        }
+      );
+
+      // Final parse with complete content
       setRawOutput(content);
       const parsed = parseXMLOutput(content, selectedWorkflow.outputSections);
       setOutput(parsed);
@@ -1041,16 +1143,29 @@ export default function App() {
                   </div>
                 )}
 
-                {loading && (
+                {loading && !rawOutput && (
                   <div className="flex items-center justify-center h-[300px]">
                     <div className="text-center">
                       <Loader2 className="w-8 h-8 mx-auto mb-2 text-blue-500 animate-spin" />
-                      <p className="text-sm text-slate-600">Generating with {currentProvider.name}...</p>
+                      <p className="text-sm text-slate-600">Connecting to {currentProvider.name}...</p>
                     </div>
                   </div>
                 )}
 
-                {output && (
+                {loading && rawOutput && (
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2 px-3 py-2 bg-blue-50 rounded-lg">
+                      <Loader2 className="w-4 h-4 text-blue-500 animate-spin" />
+                      <span className="text-sm text-blue-700 font-medium">Streaming response...</span>
+                      <span className="text-xs text-blue-500">({rawOutput.length.toLocaleString()} chars)</span>
+                    </div>
+                    <div className="bg-slate-50 rounded-lg p-3 max-h-[400px] overflow-y-auto">
+                      <pre className="text-xs text-slate-600 whitespace-pre-wrap font-mono">{rawOutput}</pre>
+                    </div>
+                  </div>
+                )}
+
+                {!loading && output && (
                   <div className="space-y-4 max-h-[500px] overflow-y-auto">
                     {selectedWorkflow.outputSections.map(section => {
                       const content = output[section.id];
