@@ -7,7 +7,7 @@ import {
   Phone, TrendingUp, ClipboardList, Mail, Star, PieChart, CheckSquare,
   Download, Upload, Key, Database, Globe, Save, X, Menu, AlertCircle,
   Linkedin, ExternalLink, RefreshCw, Clock, Zap, Shield, Info, Code,
-  ChevronDown, ChevronUp, FileDown
+  ChevronDown, ChevronUp, FileDown, Play, Package, CheckCircle, Circle
 } from 'lucide-react';
 
 // Icon mapping
@@ -99,6 +99,55 @@ const WORKFLOW_SUGGESTIONS = {
   'social': ['seo-blog-article', 'email-newsletter', 'content-strategy-brief'],
   'operations': ['content-strategy-brief', 'client-testimonial', 'competitor-analysis']
 };
+
+// Campaign presets - predefined workflow bundles
+const CAMPAIGN_PRESETS = [
+  {
+    id: 'full-content',
+    name: 'Full Content Campaign',
+    description: 'Strategy brief, blog article, social posts, and email newsletter',
+    icon: 'Package',
+    color: '#6366f1',
+    workflowIds: ['content-strategy-brief', 'seo-blog-article', 'linkedin-content', 'email-newsletter'],
+    estimatedTime: '8-12 min'
+  },
+  {
+    id: 'advertising-blitz',
+    name: 'Advertising Campaign',
+    description: 'Landing page, Google Ads, and social ads',
+    icon: 'Target',
+    color: '#f59e0b',
+    workflowIds: ['ppc-landing-page', 'google-ads', 'facebook-instagram-ads'],
+    estimatedTime: '6-10 min'
+  },
+  {
+    id: 'social-media',
+    name: 'Social Media Bundle',
+    description: 'LinkedIn content and social media ads',
+    icon: 'Share2',
+    color: '#0ea5e9',
+    workflowIds: ['linkedin-content', 'facebook-instagram-ads'],
+    estimatedTime: '4-6 min'
+  },
+  {
+    id: 'seo-focused',
+    name: 'SEO Content Package',
+    description: 'Blog article, website copy, and Google Business Profile',
+    icon: 'Search',
+    color: '#10b981',
+    workflowIds: ['seo-blog-article', 'website-copy', 'google-business-profile'],
+    estimatedTime: '6-8 min'
+  },
+  {
+    id: 'client-success',
+    name: 'Client Success Story',
+    description: 'Case study, testimonial, and promotional content',
+    icon: 'Star',
+    color: '#8b5cf6',
+    workflowIds: ['case-study-generator', 'client-testimonial', 'linkedin-content'],
+    estimatedTime: '5-8 min'
+  }
+];
 
 // Environment variables for default API keys (set in .env file)
 const ENV_API_KEYS = {
@@ -222,6 +271,13 @@ export default function App() {
     website: '',
     uniqueValue: ''
   });
+
+  // Campaign Builder states
+  const [campaignWorkflows, setCampaignWorkflows] = useState([]);
+  const [campaignResults, setCampaignResults] = useState([]);
+  const [campaignProgress, setCampaignProgress] = useState({ current: 0, total: 0, status: 'idle' });
+  const [campaignClientProfile, setCampaignClientProfile] = useState(null);
+  const [campaignFormData, setCampaignFormData] = useState({});
 
   // Load settings from localStorage on mount
   useEffect(() => {
@@ -467,6 +523,172 @@ export default function App() {
     setError(null);
     setShowSuggestions(false);
     setCurrentView('workflow');
+  };
+
+  // Campaign Builder Functions
+  const selectCampaignPreset = (preset) => {
+    const selectedWorkflowsList = preset.workflowIds
+      .map(id => workflows.find(w => w.id === id))
+      .filter(Boolean);
+    setCampaignWorkflows(selectedWorkflowsList);
+  };
+
+  const toggleCampaignWorkflow = (workflow) => {
+    setCampaignWorkflows(prev => {
+      const exists = prev.find(w => w.id === workflow.id);
+      if (exists) {
+        return prev.filter(w => w.id !== workflow.id);
+      }
+      return [...prev, workflow];
+    });
+  };
+
+  const buildCampaignFormData = (workflow, profile, previousOutputs) => {
+    const data = {};
+
+    workflow.inputs.forEach(input => {
+      // Apply from client profile
+      if (input.id === 'client_name' && profile?.name) {
+        data[input.id] = profile.name;
+      } else if ((input.id === 'target_location' || input.id === 'location') && profile?.location) {
+        data[input.id] = profile.location;
+      } else if (input.id === 'practice_areas' && profile?.practiceAreas?.length) {
+        data[input.id] = profile.practiceAreas;
+      } else if (input.id === 'website_url' && profile?.website) {
+        data[input.id] = profile.website;
+      } else if (input.id === 'competitors' && profile?.competitors) {
+        data[input.id] = profile.competitors;
+      } else if (input.id === 'tone' && profile?.tone) {
+        data[input.id] = profile.tone;
+      } else if (input.id === 'unique_value' && profile?.uniqueValue) {
+        data[input.id] = profile.uniqueValue;
+      }
+      // Transfer data from previous outputs
+      else if (input.id === 'topic' && previousOutputs.length > 0) {
+        const briefOutput = previousOutputs.find(p => p.workflowId === 'content-strategy-brief');
+        if (briefOutput?.outputs?.topic_suggestions) {
+          const topics = briefOutput.outputs.topic_suggestions.split('\n').filter(t => t.trim());
+          if (topics.length > 0) {
+            data[input.id] = topics[0].replace(/^[\d\.\-\*]+\s*/, '').trim();
+          }
+        }
+      }
+      else if (input.id === 'content_to_repurpose' && previousOutputs.length > 0) {
+        const articleOutput = previousOutputs.find(p => p.workflowId === 'seo-blog-article');
+        if (articleOutput?.outputs?.article_body) {
+          data[input.id] = articleOutput.outputs.article_body.substring(0, 2000);
+        }
+      }
+      // Apply manual form data overrides
+      else if (campaignFormData[input.id] !== undefined) {
+        data[input.id] = campaignFormData[input.id];
+      }
+      // Use defaults
+      else if (input.default !== undefined) {
+        data[input.id] = input.default;
+      }
+    });
+
+    return data;
+  };
+
+  const runCampaign = async () => {
+    const apiKey = getCurrentApiKey();
+    if (!apiKey) {
+      setError(`API key not configured. Please go to Settings and add your ${MODEL_PROVIDERS[settings.provider].name} API key.`);
+      return;
+    }
+
+    if (campaignWorkflows.length === 0) {
+      setError('Please select at least one workflow for your campaign.');
+      return;
+    }
+
+    setCampaignProgress({ current: 0, total: campaignWorkflows.length, status: 'running' });
+    setCampaignResults([]);
+    setError(null);
+
+    const results = [];
+
+    for (let i = 0; i < campaignWorkflows.length; i++) {
+      const workflow = campaignWorkflows[i];
+      setCampaignProgress({ current: i + 1, total: campaignWorkflows.length, status: 'running' });
+
+      try {
+        const workflowFormData = buildCampaignFormData(workflow, campaignClientProfile, results);
+        const userMessage = buildUserMessage(workflow, workflowFormData);
+
+        const content = await callAPIStreaming(
+          workflow.systemPrompt,
+          userMessage,
+          () => {} // No streaming updates needed for batch
+        );
+
+        const parsed = parseXMLOutput(content, workflow.outputSections);
+
+        const result = {
+          workflowId: workflow.id,
+          workflowName: workflow.name,
+          workflowColor: workflow.color,
+          inputs: workflowFormData,
+          outputs: parsed,
+          rawContent: content,
+          outputSections: workflow.outputSections,
+          timestamp: new Date().toISOString()
+        };
+
+        results.push(result);
+        setCampaignResults([...results]);
+
+        // Also save as individual artifact
+        saveArtifact(workflow, workflowFormData, parsed, content);
+      } catch (err) {
+        results.push({
+          workflowId: workflow.id,
+          workflowName: workflow.name,
+          workflowColor: workflow.color,
+          error: err.message,
+          timestamp: new Date().toISOString()
+        });
+        setCampaignResults([...results]);
+      }
+    }
+
+    setCampaignProgress({ current: campaignWorkflows.length, total: campaignWorkflows.length, status: 'complete' });
+  };
+
+  const exportCampaignAsZip = async () => {
+    if (campaignResults.length === 0) return;
+
+    const dateStr = new Date().toISOString().split('T')[0];
+    const clientName = campaignClientProfile?.name || 'campaign';
+
+    // Create a combined markdown file for all outputs
+    let combinedContent = `# ${clientName} - Campaign Bundle\n\nGenerated: ${dateStr}\n\n---\n\n`;
+
+    campaignResults.forEach((result, index) => {
+      if (result.error) {
+        combinedContent += `## ${index + 1}. ${result.workflowName} (ERROR)\n\n${result.error}\n\n---\n\n`;
+      } else {
+        combinedContent += `## ${index + 1}. ${result.workflowName}\n\n`;
+        (result.outputSections || []).forEach(section => {
+          const sectionContent = result.outputs?.[section.id];
+          if (sectionContent) {
+            combinedContent += `### ${section.label}\n\n${sectionContent}\n\n`;
+          }
+        });
+        combinedContent += `---\n\n`;
+      }
+    });
+
+    downloadMarkdown(combinedContent, `${clientName.toLowerCase().replace(/\s+/g, '-')}-campaign-${dateStr}.md`);
+  };
+
+  const resetCampaign = () => {
+    setCampaignWorkflows([]);
+    setCampaignResults([]);
+    setCampaignProgress({ current: 0, total: 0, status: 'idle' });
+    setCampaignFormData({});
   };
 
   // Filtered workflows for search
@@ -921,6 +1143,328 @@ export default function App() {
     setCurrentView('artifact');
   };
 
+  // Render Campaign Builder Page
+  const renderCampaignBuilder = () => {
+    const hasApiKey = !!getCurrentApiKey();
+    const currentProvider = MODEL_PROVIDERS[settings.provider];
+    const isRunning = campaignProgress.status === 'running';
+    const isComplete = campaignProgress.status === 'complete';
+
+    return (
+      <div className="min-h-screen bg-slate-50">
+        <header className="bg-white border-b border-slate-200 sticky top-0 z-50">
+          <div className="max-w-6xl mx-auto px-4 h-12 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <button onClick={() => { setCurrentView('dashboard'); resetCampaign(); }} className="p-2 hover:bg-slate-100 rounded-lg">
+                <ArrowLeft className="w-4 h-4 text-slate-500" />
+              </button>
+              <Package className="w-5 h-5 text-indigo-600" />
+              <span className="font-semibold text-slate-900">Campaign Builder</span>
+              {campaignWorkflows.length > 0 && (
+                <span className="text-xs px-2 py-1 bg-indigo-100 text-indigo-700 rounded">
+                  {campaignWorkflows.length} workflows selected
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              {hasApiKey && (
+                <span className="text-xs px-2 py-1 bg-slate-100 rounded text-slate-600">
+                  {currentProvider.icon} {(settings.model || 'Unknown').split('-').slice(0, 2).join(' ')}
+                </span>
+              )}
+            </div>
+          </div>
+        </header>
+
+        <main className="max-w-6xl mx-auto px-4 py-4">
+          {error && (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4 flex items-center gap-3 text-sm">
+              <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0" />
+              <span className="text-red-800">{error}</span>
+              <button onClick={() => setError(null)} className="ml-auto text-red-600 hover:text-red-800">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          )}
+
+          {/* Campaign Results View */}
+          {campaignResults.length > 0 && (
+            <div className="mb-6">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                  {isComplete ? <CheckCircle className="w-5 h-5 text-green-600" /> : <Loader2 className="w-5 h-5 text-indigo-600 animate-spin" />}
+                  Campaign Results {isComplete && `(${campaignResults.filter(r => !r.error).length}/${campaignResults.length} successful)`}
+                </h2>
+                <div className="flex items-center gap-2">
+                  {isComplete && (
+                    <>
+                      <button
+                        onClick={exportCampaignAsZip}
+                        className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
+                      >
+                        <Download className="w-4 h-4" />
+                        Export All
+                      </button>
+                      <button
+                        onClick={resetCampaign}
+                        className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100 rounded-lg"
+                      >
+                        <RefreshCw className="w-4 h-4" />
+                        New Campaign
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              {/* Progress Bar */}
+              {isRunning && (
+                <div className="mb-4">
+                  <div className="flex items-center justify-between text-sm text-slate-600 mb-1">
+                    <span>Running workflow {campaignProgress.current} of {campaignProgress.total}...</span>
+                    <span>{Math.round((campaignProgress.current / campaignProgress.total) * 100)}%</span>
+                  </div>
+                  <div className="w-full h-2 bg-slate-200 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-indigo-600 transition-all duration-300"
+                      style={{ width: `${(campaignProgress.current / campaignProgress.total) * 100}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Results Cards */}
+              <div className="space-y-4">
+                {campaignResults.map((result, index) => (
+                  <div key={index} className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+                    <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div
+                          className="w-8 h-8 rounded-lg flex items-center justify-center"
+                          style={{ backgroundColor: (result.workflowColor || '#6366f1') + '15' }}
+                        >
+                          {result.error ? (
+                            <AlertCircle className="w-4 h-4 text-red-500" />
+                          ) : (
+                            <CheckCircle className="w-4 h-4" style={{ color: result.workflowColor || '#6366f1' }} />
+                          )}
+                        </div>
+                        <div>
+                          <h3 className="font-medium text-slate-900">{result.workflowName}</h3>
+                          {result.error && <p className="text-xs text-red-600">Error: {result.error}</p>}
+                        </div>
+                      </div>
+                      {!result.error && (
+                        <button
+                          onClick={() => copyToClipboard(result.rawContent, `campaign-${index}`)}
+                          className="text-xs flex items-center gap-1 text-slate-500 hover:text-blue-600 px-2 py-1"
+                        >
+                          {copiedId === `campaign-${index}` ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                          {copiedId === `campaign-${index}` ? 'Copied' : 'Copy All'}
+                        </button>
+                      )}
+                    </div>
+                    {!result.error && (
+                      <div className="p-4 max-h-64 overflow-y-auto">
+                        {(result.outputSections || []).slice(0, 2).map(section => {
+                          const content = result.outputs?.[section.id];
+                          if (!content) return null;
+                          return (
+                            <div key={section.id} className="mb-3">
+                              <h4 className="text-xs font-medium text-slate-500 uppercase mb-1">{section.label}</h4>
+                              <div className="text-sm text-slate-700 line-clamp-4">
+                                {content.substring(0, 500)}{content.length > 500 ? '...' : ''}
+                              </div>
+                            </div>
+                          );
+                        })}
+                        {(result.outputSections || []).length > 2 && (
+                          <p className="text-xs text-slate-400">+ {(result.outputSections || []).length - 2} more sections</p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Campaign Setup (show when not running and no results) */}
+          {!isRunning && campaignResults.length === 0 && (
+            <>
+              {/* Client Profile Selection */}
+              <div className="bg-white rounded-xl border border-slate-200 p-4 mb-4">
+                <h3 className="font-semibold text-slate-900 mb-3 flex items-center gap-2">
+                  <Database className="w-4 h-4 text-slate-500" />
+                  Client Profile
+                </h3>
+                {clientProfiles.length === 0 ? (
+                  <div className="text-sm text-slate-500">
+                    No client profiles saved yet.{' '}
+                    <button onClick={() => setCurrentView('settings')} className="text-blue-600 hover:underline">
+                      Create one in Settings
+                    </button>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
+                    {clientProfiles.map(profile => (
+                      <button
+                        key={profile.id}
+                        onClick={() => setCampaignClientProfile(profile)}
+                        className={`p-3 rounded-lg border-2 text-left transition-all ${
+                          campaignClientProfile?.id === profile.id
+                            ? 'border-indigo-500 bg-indigo-50'
+                            : 'border-slate-200 hover:border-slate-300'
+                        }`}
+                      >
+                        <div className="font-medium text-slate-900 truncate">{profile.name}</div>
+                        <div className="text-xs text-slate-500 truncate">{profile.location || 'No location'}</div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Campaign Presets */}
+              <div className="mb-4">
+                <h3 className="font-semibold text-slate-900 mb-3 flex items-center gap-2">
+                  <Zap className="w-4 h-4 text-amber-500" />
+                  Quick Start Presets
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {CAMPAIGN_PRESETS.map(preset => {
+                    const PresetIcon = iconMap[preset.icon] || Package;
+                    const isSelected = preset.workflowIds.every(id =>
+                      campaignWorkflows.find(w => w.id === id)
+                    ) && campaignWorkflows.length === preset.workflowIds.length;
+
+                    return (
+                      <button
+                        key={preset.id}
+                        onClick={() => selectCampaignPreset(preset)}
+                        className={`p-4 rounded-xl border-2 text-left transition-all ${
+                          isSelected
+                            ? 'border-indigo-500 bg-indigo-50'
+                            : 'border-slate-200 bg-white hover:border-slate-300 hover:shadow-sm'
+                        }`}
+                      >
+                        <div className="flex items-start gap-3">
+                          <div
+                            className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0"
+                            style={{ backgroundColor: preset.color + '15' }}
+                          >
+                            <PresetIcon className="w-5 h-5" style={{ color: preset.color }} />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <h4 className="font-semibold text-slate-900">{preset.name}</h4>
+                            <p className="text-xs text-slate-500 mt-0.5">{preset.description}</p>
+                            <div className="flex items-center gap-2 mt-2 text-xs text-slate-400">
+                              <span>{preset.workflowIds.length} workflows</span>
+                              <span>•</span>
+                              <span>{preset.estimatedTime}</span>
+                            </div>
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Custom Workflow Selection */}
+              <div className="bg-white rounded-xl border border-slate-200 p-4 mb-4">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="font-semibold text-slate-900 flex items-center gap-2">
+                    <Layers className="w-4 h-4 text-slate-500" />
+                    Select Workflows
+                  </h3>
+                  {campaignWorkflows.length > 0 && (
+                    <button
+                      onClick={() => setCampaignWorkflows([])}
+                      className="text-xs text-slate-500 hover:text-slate-700"
+                    >
+                      Clear all
+                    </button>
+                  )}
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
+                  {workflows.map(workflow => {
+                    const isSelected = campaignWorkflows.find(w => w.id === workflow.id);
+                    const WIcon = iconMap[workflow.icon] || FileText;
+                    return (
+                      <button
+                        key={workflow.id}
+                        onClick={() => toggleCampaignWorkflow(workflow)}
+                        disabled={!hasApiKey}
+                        className={`p-3 rounded-lg border-2 text-left transition-all disabled:opacity-50 ${
+                          isSelected
+                            ? 'border-indigo-500 bg-indigo-50'
+                            : 'border-slate-200 hover:border-slate-300'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          {isSelected ? (
+                            <CheckCircle className="w-4 h-4 text-indigo-600 flex-shrink-0" />
+                          ) : (
+                            <Circle className="w-4 h-4 text-slate-300 flex-shrink-0" />
+                          )}
+                          <WIcon className="w-4 h-4 flex-shrink-0" style={{ color: workflow.color }} />
+                          <span className="font-medium text-sm text-slate-900 truncate">{workflow.name}</span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Selected Workflows Order */}
+              {campaignWorkflows.length > 0 && (
+                <div className="bg-slate-50 rounded-xl border border-slate-200 p-4 mb-4">
+                  <h3 className="font-semibold text-slate-900 mb-3">Execution Order</h3>
+                  <div className="flex flex-wrap gap-2">
+                    {campaignWorkflows.map((workflow, index) => {
+                      const WIcon = iconMap[workflow.icon] || FileText;
+                      return (
+                        <div
+                          key={workflow.id}
+                          className="flex items-center gap-2 px-3 py-2 bg-white rounded-lg border border-slate-200"
+                        >
+                          <span className="w-5 h-5 rounded-full bg-indigo-600 text-white text-xs flex items-center justify-center">
+                            {index + 1}
+                          </span>
+                          <WIcon className="w-4 h-4" style={{ color: workflow.color }} />
+                          <span className="text-sm font-medium text-slate-900">{workflow.name}</span>
+                          <button
+                            onClick={() => toggleCampaignWorkflow(workflow)}
+                            className="text-slate-400 hover:text-red-500 ml-1"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Run Campaign Button */}
+              <div className="flex justify-center">
+                <button
+                  onClick={runCampaign}
+                  disabled={!hasApiKey || campaignWorkflows.length === 0}
+                  className="flex items-center gap-2 px-6 py-3 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed font-semibold"
+                >
+                  <Play className="w-5 h-5" />
+                  Run Campaign ({campaignWorkflows.length} workflows)
+                </button>
+              </div>
+            </>
+          )}
+        </main>
+      </div>
+    );
+  };
+
   // Render History Page
   const renderHistory = () => {
     return (
@@ -1363,6 +1907,14 @@ export default function App() {
                   {currentProvider.icon} {(settings.model || 'Unknown').split('-').slice(0, 2).join(' ')}
                 </span>
               )}
+              <button
+                onClick={() => setCurrentView('campaign')}
+                className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white text-xs rounded-lg hover:bg-indigo-700"
+                title="Campaign Builder"
+              >
+                <Package className="w-3.5 h-3.5" />
+                Campaign
+              </button>
               <button onClick={() => setCurrentView('history')} className="p-2 hover:bg-slate-100 rounded-lg relative">
                 <Clock className="w-4 h-4 text-slate-500" />
                 {artifacts.length > 0 && (
@@ -1396,9 +1948,15 @@ export default function App() {
                 <h2 className="text-lg font-bold">AI-Powered Legal Marketing</h2>
                 <p className="text-blue-100 text-sm">{totalWorkflows} workflows for content, ads & operations</p>
               </div>
-              <div className="hidden sm:flex items-center gap-2 text-xs">
-                <span className="px-2 py-1 bg-white/20 rounded">{totalWorkflows} Workflows</span>
-                <span className="px-2 py-1 bg-white/20 rounded">{Object.keys(categories).length} Categories</span>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setCurrentView('campaign')}
+                  disabled={!hasApiKey}
+                  className="flex items-center gap-2 px-4 py-2 bg-white text-indigo-700 rounded-lg hover:bg-blue-50 disabled:opacity-50 disabled:cursor-not-allowed font-semibold text-sm transition-colors"
+                >
+                  <Package className="w-4 h-4" />
+                  Campaign Builder
+                </button>
               </div>
             </div>
           </div>
@@ -2142,5 +2700,6 @@ export default function App() {
   if (currentView === 'workflow') return renderWorkflowPage();
   if (currentView === 'history') return renderHistory();
   if (currentView === 'artifact') return renderArtifactDetail();
+  if (currentView === 'campaign') return renderCampaignBuilder();
   return renderDashboard();
 }
